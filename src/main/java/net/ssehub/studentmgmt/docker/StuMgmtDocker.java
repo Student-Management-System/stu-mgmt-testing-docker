@@ -74,6 +74,10 @@ public class StuMgmtDocker implements AutoCloseable {
     
     private int webPort;
     
+    private boolean withSvn;
+    
+    private int svnPort;
+    
     private Map<String, String> userPasswords;
     
     private Map<String, String> userMgmtIds;
@@ -86,12 +90,13 @@ public class StuMgmtDocker implements AutoCloseable {
      * 
      * @param dockerDirectory The directory where the <code>docker-compose.yml</code> file for the student management
      *      system lies.
+     * @param withSvn Whether a SVN server should be set up, too.
      * 
      * @throws IllegalArgumentException If the given directory is not a directory or does not contain a
      *      docker-compose.yml file.
      * @throws DockerException If executing docker fails.
      */
-    public StuMgmtDocker(File dockerDirectory) throws DockerException {
+    public StuMgmtDocker(File dockerDirectory, boolean withSvn) throws DockerException {
         if (!dockerDirectory.isDirectory()) {
             throw new IllegalArgumentException(dockerDirectory + " is not a directory");
         }
@@ -99,11 +104,13 @@ public class StuMgmtDocker implements AutoCloseable {
             throw new IllegalArgumentException(dockerDirectory + " does not contain a docker-compose.yml file");
         }
         this.dockerDirectory = dockerDirectory;
+        this.withSvn = withSvn;
         
         this.dockerId = String.format("stu-mgmt-testing-%04d", (int) (Math.random() * 1024));
         this.authPort = generateRandomPort();
         this.mgmtPort = generateRandomPort();
         this.webPort = generateRandomPort();
+        this.svnPort = generateRandomPort();
 
         startDocker();
         
@@ -124,7 +131,19 @@ public class StuMgmtDocker implements AutoCloseable {
      * @throws DockerException If executing docker fails.
      */
     public StuMgmtDocker() {
-        this(getDockerRootPath());
+        this(getDockerRootPath(), false);
+    }
+    
+    /**
+     * Starts a new instance of the Student Management System in docker containers. Waits until the services are fully
+     * started.
+     * 
+     * @param withSvn Whether a SVN server should be set up, too.
+     * 
+     * @throws DockerException If executing docker fails.
+     */
+    public StuMgmtDocker(boolean withSvn) {
+        this(getDockerRootPath(), withSvn);
     }
 
     /**
@@ -221,6 +240,11 @@ public class StuMgmtDocker implements AutoCloseable {
         environment.put("SPARKY_PORT", Integer.toString(authPort));
         environment.put("BACKEND_PORT", Integer.toString(mgmtPort));
         environment.put("FRONTEND_PORT", Integer.toString(webPort));
+        environment.put("SVN_PORT", Integer.toString(svnPort));
+        
+        if (withSvn) {
+            environment.put("COMPOSE_PROFILES", "svn");
+        }
         
         Process p;
         try {
@@ -289,6 +313,34 @@ public class StuMgmtDocker implements AutoCloseable {
      */
     public String getWebUrl() {
         return "http://localhost:" + webPort + "/";
+    }
+    
+    /**
+     * Returns the URL of the SVN server.
+     * 
+     * @return The URL of the SVN server.
+     * 
+     * @throws IllegalStateException If there is no SVN server set up.
+     * 
+     * @see #StuMgmtDocker(boolean)
+     * @see #isWithSvn()
+     */
+    public String getSvnUrl() throws IllegalStateException {
+        if (!withSvn) {
+            throw new IllegalStateException("SVN server not enabled");
+        }
+        
+        return "http://localhost:" + svnPort + "/svn/submission/";
+    }
+    
+    
+    /**
+     * Whether an SVN server is running.
+     * 
+     * @return If an SVN is running.
+     */
+    public boolean isWithSvn() {
+        return withSvn;
     }
     
     /**
@@ -542,7 +594,7 @@ public class StuMgmtDocker implements AutoCloseable {
      * @throws IOException If reading System.in fails.
      */
     public static void main(String[] args) throws IOException {
-        try (StuMgmtDocker docker = new StuMgmtDocker()) {
+        try (StuMgmtDocker docker = new StuMgmtDocker(true)) {
             
             docker.createUser("adam", "123456");
             docker.createUser("student1", "123456");
@@ -565,6 +617,9 @@ public class StuMgmtDocker implements AutoCloseable {
             System.out.println("Auth: " + docker.getAuthUrl());
             System.out.println("Mgmt: " + docker.getStuMgmtUrl());
             System.out.println("Web:  " + docker.getWebUrl());
+            if (docker.isWithSvn()) {
+                System.out.println("SVN:  " + docker.getSvnUrl());
+            }
             
             System.out.println();
             System.out.println("Press enter to stop");
