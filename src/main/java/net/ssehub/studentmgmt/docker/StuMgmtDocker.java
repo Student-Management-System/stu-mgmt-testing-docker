@@ -13,10 +13,16 @@ import java.util.Map;
 import java.util.Map.Entry;
 import java.util.Properties;
 
+import net.ssehub.studentmgmt.backend_api.api.AssignmentApi;
 import net.ssehub.studentmgmt.backend_api.api.AuthenticationApi;
 import net.ssehub.studentmgmt.backend_api.api.CourseApi;
 import net.ssehub.studentmgmt.backend_api.api.CourseParticipantsApi;
 import net.ssehub.studentmgmt.backend_api.api.GroupApi;
+import net.ssehub.studentmgmt.backend_api.model.AssignmentDto;
+import net.ssehub.studentmgmt.backend_api.model.AssignmentUpdateDto;
+import net.ssehub.studentmgmt.backend_api.model.AssignmentDto.CollaborationEnum;
+import net.ssehub.studentmgmt.backend_api.model.AssignmentDto.StateEnum;
+import net.ssehub.studentmgmt.backend_api.model.AssignmentDto.TypeEnum;
 import net.ssehub.studentmgmt.backend_api.model.CourseConfigDto;
 import net.ssehub.studentmgmt.backend_api.model.CourseCreateDto;
 import net.ssehub.studentmgmt.backend_api.model.CourseDto;
@@ -587,6 +593,133 @@ public class StuMgmtDocker implements AutoCloseable {
     }
     
     /**
+     * The state of an assignment.
+     */
+    public enum AssignmentState {
+        INVISIBLE(StateEnum.INVISIBLE,
+                net.ssehub.studentmgmt.backend_api.model.AssignmentUpdateDto.StateEnum.INVISIBLE),
+        CLOSED(StateEnum.CLOSED,
+                net.ssehub.studentmgmt.backend_api.model.AssignmentUpdateDto.StateEnum.CLOSED),
+        SUBMISSION(StateEnum.IN_PROGRESS,
+                net.ssehub.studentmgmt.backend_api.model.AssignmentUpdateDto.StateEnum.IN_PROGRESS),
+        IN_REVIEW(StateEnum.IN_REVIEW,
+                net.ssehub.studentmgmt.backend_api.model.AssignmentUpdateDto.StateEnum.IN_REVIEW),
+        REVIEWD(StateEnum.EVALUATED,
+                net.ssehub.studentmgmt.backend_api.model.AssignmentUpdateDto.StateEnum.EVALUATED);
+        
+        private StateEnum createValue;
+        
+        private net.ssehub.studentmgmt.backend_api.model.AssignmentUpdateDto.StateEnum updateValue;
+
+        /**
+         * Creates an instance.
+         * 
+         * @param createValue The corresponding value for the backend-api library when creating an assignment.
+         * @param updateValue The corresponding value for the backend-api library when updating an assignment.
+         */
+        private AssignmentState(StateEnum createValue,
+                net.ssehub.studentmgmt.backend_api.model.AssignmentUpdateDto.StateEnum updateValue) {
+            this.createValue = createValue;
+            this.updateValue = updateValue;
+        }
+        
+    }
+    
+    /**
+     * The collboration type of an assignment.
+     */
+    public enum Collaboration {
+        SINGLE(CollaborationEnum.SINGLE), GROUP(CollaborationEnum.GROUP);
+        
+        private CollaborationEnum apiValue;
+        
+        /**
+         * Creates an instance.
+         * 
+         * @param apiValue The corresponding value for the backend-api library.
+         */
+        private Collaboration(CollaborationEnum apiValue) {
+            this.apiValue = apiValue;
+        }
+        
+    }
+    
+    /**
+     * Creates an assignment in the given course.
+     * <p>
+     * Note that groups are only registered for an assignment in the {@link AssignmentState#SUBMISSION} state; if you
+     * want to have groups registered in any other state, create it with state {@link AssignmentState#SUBMISSION} and
+     * change to the desired state afterwards (see {@link #changeAssignmentState(String, String, AssignmentState)}). 
+     * 
+     * @param courseId The course to create the assignment in.
+     * @param name The name of the assignment.
+     * @param state The state of the assignment.
+     * @param collaboration The collaboration type of the assignment.
+     * 
+     * @return The ID of the assignment; used e.g. in {@link #changeAssignmentState(String, String, AssignmentState)}.
+     * 
+     * @throws DockerException If creating the assignment fails.
+     */
+    public String createAssignment(String courseId, String name, AssignmentState state,
+            Collaboration collaboration) throws DockerException {
+        
+        net.ssehub.studentmgmt.backend_api.ApiClient client
+                = getAuthenticatedBackendClient(teachersOfCourse.get(courseId));
+        
+        AssignmentApi assignmentApi = new AssignmentApi(client);
+        
+        AssignmentDto assignment = new AssignmentDto();
+        assignment.setName(name);
+        assignment.setState(state.createValue);
+        assignment.setCollaboration(collaboration.apiValue);
+        assignment.setType(TypeEnum.HOMEWORK);
+        assignment.setPoints(BigDecimal.TEN);
+        
+        try {
+            assignment = assignmentApi.createAssignment(assignment, courseId);
+        } catch (net.ssehub.studentmgmt.backend_api.ApiException e) {
+            System.err.println(e.getResponseBody());
+            throw new DockerException(e);
+        }
+        
+        System.out.println("Created " + collaboration.name() +  "-assignment " + name + " with status " + state.name());
+        
+        return assignment.getId();
+    }
+    
+    /**
+     * Changes the state of an assignment.
+     * 
+     * @param courseId The course where the assignment is in.
+     * @param assignmentId The ID of the assignment, as returned by
+     *      {@link #createAssignment(String, String, AssignmentState, Collaboration)}.
+     * @param state The new state of the assignment.
+     * 
+     * @throws DockerException If changing the state fails.
+     */
+    public void changeAssignmentState(String courseId, String assignmentId, AssignmentState state)
+            throws DockerException {
+        
+        net.ssehub.studentmgmt.backend_api.ApiClient client
+                = getAuthenticatedBackendClient(teachersOfCourse.get(courseId));
+
+        AssignmentApi assignmentApi = new AssignmentApi(client);
+        
+        AssignmentUpdateDto update = new AssignmentUpdateDto();
+        update.setState(state.updateValue);
+        
+        AssignmentDto assignment;
+        try {
+            assignment = assignmentApi.updateAssignment(update, courseId, assignmentId);
+        } catch (net.ssehub.studentmgmt.backend_api.ApiException e) {
+            System.err.println(e.getResponseBody());
+            throw new DockerException(e);
+        }
+        
+        System.out.println("Changed assignment " + assignment.getName() + " to status " + state.name());
+    }
+    
+    /**
      * Runs an instance until enter is pressed in the console.
      * 
      * @param args Command line arguments; ignored.
@@ -610,6 +743,15 @@ public class StuMgmtDocker implements AutoCloseable {
             
             docker.createGroupInCourse(courseId, "JP001", "student1", "student3");
             docker.createGroupInCourse(courseId, "JP002", "student2", "student4");
+            
+            String a1 = docker.createAssignment(courseId, "Homework01", AssignmentState.INVISIBLE, Collaboration.GROUP);
+            String a2 = docker.createAssignment(courseId, "Homework02", AssignmentState.INVISIBLE, Collaboration.GROUP);
+            docker.createAssignment(courseId, "Testat01", AssignmentState.INVISIBLE, Collaboration.SINGLE);
+            
+            docker.changeAssignmentState(courseId, a1, AssignmentState.SUBMISSION);
+            docker.changeAssignmentState(courseId, a1, AssignmentState.IN_REVIEW);
+            
+            docker.changeAssignmentState(courseId, a2, AssignmentState.SUBMISSION);
             
             System.out.println();
             System.out.println();
