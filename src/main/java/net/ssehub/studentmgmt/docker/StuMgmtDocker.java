@@ -112,7 +112,7 @@ public class StuMgmtDocker implements AutoCloseable {
         this.dockerDirectory = dockerDirectory;
         this.withSvn = withSvn;
         
-        this.dockerId = String.format("stu-mgmt-testing-%04d", (int) (Math.random() * 1024));
+        this.dockerId = String.format("stu-mgmt-testing-%04d", (int) (Math.random() * 10000));
         this.authPort = generateRandomPort();
         this.mgmtPort = generateRandomPort();
         this.webPort = generateRandomPort();
