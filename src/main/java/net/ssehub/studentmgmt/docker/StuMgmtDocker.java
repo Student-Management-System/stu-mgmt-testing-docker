@@ -568,7 +568,7 @@ public class StuMgmtDocker implements AutoCloseable {
      * 
      * @throws DockerException If enrolling the student fails.
      */
-    public void enrollStudentInCourse(String courseId, String student) throws DockerException {
+    public void enrollStudent(String courseId, String student) throws DockerException {
         net.ssehub.studentmgmt.backend_api.ApiClient client = getAuthenticatedBackendClient(student);
         CourseParticipantsApi api = new CourseParticipantsApi(client);
         
@@ -596,7 +596,7 @@ public class StuMgmtDocker implements AutoCloseable {
      * 
      * @throws DockerException If creating the group fails.
      */
-    public String createGroupInCourse(String courseId, String groupName, String... members) throws DockerException {
+    public String createGroup(String courseId, String groupName, String... members) throws DockerException {
         net.ssehub.studentmgmt.backend_api.ApiClient client
                 = getAuthenticatedBackendClient(teachersOfCourse.get(courseId));
         GroupApi api = new GroupApi(client);
@@ -776,13 +776,13 @@ public class StuMgmtDocker implements AutoCloseable {
             
             docker.startSvn(courseId, "svn");
             
-            docker.enrollStudentInCourse(courseId, "student1");
-            docker.enrollStudentInCourse(courseId, "student2");
-            docker.enrollStudentInCourse(courseId, "student3");
-            docker.enrollStudentInCourse(courseId, "student4");
+            docker.enrollStudent(courseId, "student1");
+            docker.enrollStudent(courseId, "student2");
+            docker.enrollStudent(courseId, "student3");
+            docker.enrollStudent(courseId, "student4");
             
-            docker.createGroupInCourse(courseId, "JP001", "student1", "student3");
-            docker.createGroupInCourse(courseId, "JP002", "student2", "student4");
+            docker.createGroup(courseId, "JP001", "student1", "student3");
+            docker.createGroup(courseId, "JP002", "student2", "student4");
             
             String a1 = docker.createAssignment(courseId, "Homework01", AssignmentState.INVISIBLE, Collaboration.GROUP);
             String a2 = docker.createAssignment(courseId, "Homework02", AssignmentState.INVISIBLE, Collaboration.GROUP);
