@@ -95,6 +95,8 @@ public class StuMgmtDocker implements AutoCloseable {
     
     private Map<String, String> userPasswords;
     
+    private Map<String, String> userTokens;
+    
     private Map<String, String> userMgmtIds;
     
     private Map<String, String> teachersOfCourse;
@@ -129,6 +131,7 @@ public class StuMgmtDocker implements AutoCloseable {
         
         this.userPasswords = new HashMap<>();
         this.userPasswords.put("admin_user", "admin_pw");
+        this.userTokens = new HashMap<>();
         
         this.userMgmtIds = new HashMap<>();
         this.teachersOfCourse = new HashMap<>();
@@ -553,23 +556,30 @@ public class StuMgmtDocker implements AutoCloseable {
      * @throws DockerException If getting the token fails.
      */
     private String getToken(String user) throws DockerException {
-        ApiClient client = new ApiClient();
-        client.setBasePath(getAuthUrl());
+        String token = userTokens.get(user);
         
-        CredentialsDto credentials = new CredentialsDto();
-        credentials.setUsername(user);
-        credentials.setPassword(userPasswords.get(user));
-        
-        AuthControllerApi api = new AuthControllerApi(client);
-        AuthenticationInfoDto auth;
-        try {
-            auth = api.authenticate(credentials);
-        } catch (ApiException e) {
-            System.err.println(e.getResponseBody());
-            throw new DockerException(e);
+        if (token == null) {
+            ApiClient client = new ApiClient();
+            client.setBasePath(getAuthUrl());
+            
+            CredentialsDto credentials = new CredentialsDto();
+            credentials.setUsername(user);
+            credentials.setPassword(userPasswords.get(user));
+            
+            AuthControllerApi api = new AuthControllerApi(client);
+            AuthenticationInfoDto auth;
+            try {
+                auth = api.authenticate(credentials);
+            } catch (ApiException e) {
+                System.err.println(e.getResponseBody());
+                throw new DockerException(e);
+            }
+            
+            token = auth.getToken().getToken();
+            userTokens.put(user, token);
         }
         
-        return auth.getToken().getToken();
+        return token;
     }
     
     /**
