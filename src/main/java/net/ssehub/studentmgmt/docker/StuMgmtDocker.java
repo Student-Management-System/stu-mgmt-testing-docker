@@ -393,7 +393,7 @@ public class StuMgmtDocker implements AutoCloseable {
      * Helper method that waits until the rights-management in the SVN server is alive.
      */
     private void waitUntilSvnRightsManagementReachable() {
-        // we seem to have on way to contact the rights-management service inside the SVN server...
+        // we seem to have no way to contact the rights-management service inside the svn container...
         // thus we hackily just get the log output and grep for the status
         
         ProcessBuilder pb = new ProcessBuilder("docker-compose", "--project-name", dockerId, "logs", "svn");
