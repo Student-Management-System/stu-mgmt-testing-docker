@@ -8,6 +8,7 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.math.BigDecimal;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Map.Entry;
@@ -18,6 +19,7 @@ import net.ssehub.studentmgmt.backend_api.api.AuthenticationApi;
 import net.ssehub.studentmgmt.backend_api.api.CourseApi;
 import net.ssehub.studentmgmt.backend_api.api.CourseParticipantsApi;
 import net.ssehub.studentmgmt.backend_api.api.GroupApi;
+import net.ssehub.studentmgmt.backend_api.api.NotificationApi;
 import net.ssehub.studentmgmt.backend_api.model.AssignmentDto;
 import net.ssehub.studentmgmt.backend_api.model.AssignmentUpdateDto;
 import net.ssehub.studentmgmt.backend_api.model.AssignmentDto.CollaborationEnum;
@@ -29,6 +31,7 @@ import net.ssehub.studentmgmt.backend_api.model.CourseDto;
 import net.ssehub.studentmgmt.backend_api.model.GroupDto;
 import net.ssehub.studentmgmt.backend_api.model.GroupSettingsDto;
 import net.ssehub.studentmgmt.backend_api.model.PasswordDto;
+import net.ssehub.studentmgmt.backend_api.model.SubscriberDto;
 import net.ssehub.studentmgmt.sparkyservice_api.ApiClient;
 import net.ssehub.studentmgmt.sparkyservice_api.ApiException;
 import net.ssehub.studentmgmt.sparkyservice_api.api.AuthControllerApi;
@@ -80,7 +83,7 @@ public class StuMgmtDocker implements AutoCloseable {
     
     private int webPort;
     
-    private boolean withSvn;
+    private boolean svnRunning;
     
     private int svnPort;
     
@@ -96,13 +99,12 @@ public class StuMgmtDocker implements AutoCloseable {
      * 
      * @param dockerDirectory The directory where the <code>docker-compose.yml</code> file for the student management
      *      system lies.
-     * @param withSvn Whether a SVN server should be set up, too.
      * 
      * @throws IllegalArgumentException If the given directory is not a directory or does not contain a
      *      docker-compose.yml file.
      * @throws DockerException If executing docker fails.
      */
-    public StuMgmtDocker(File dockerDirectory, boolean withSvn) throws DockerException {
+    public StuMgmtDocker(File dockerDirectory) throws DockerException {
         if (!dockerDirectory.isDirectory()) {
             throw new IllegalArgumentException(dockerDirectory + " is not a directory");
         }
@@ -110,7 +112,6 @@ public class StuMgmtDocker implements AutoCloseable {
             throw new IllegalArgumentException(dockerDirectory + " does not contain a docker-compose.yml file");
         }
         this.dockerDirectory = dockerDirectory;
-        this.withSvn = withSvn;
         
         this.dockerId = String.format("stu-mgmt-testing-%04d", (int) (Math.random() * 10000));
         this.authPort = generateRandomPort();
@@ -137,21 +138,9 @@ public class StuMgmtDocker implements AutoCloseable {
      * @throws DockerException If executing docker fails.
      */
     public StuMgmtDocker() {
-        this(getDockerRootPath(), false);
+        this(getDockerRootPath());
     }
     
-    /**
-     * Starts a new instance of the Student Management System in docker containers. Waits until the services are fully
-     * started.
-     * 
-     * @param withSvn Whether a SVN server should be set up, too.
-     * 
-     * @throws DockerException If executing docker fails.
-     */
-    public StuMgmtDocker(boolean withSvn) {
-        this(getDockerRootPath(), withSvn);
-    }
-
     /**
      * Gets the path to the <code>docker-compose.yml</code> file from either the system property or the configuration
      * file.
@@ -206,7 +195,7 @@ public class StuMgmtDocker implements AutoCloseable {
      * @throws DockerException If starting the containers fails.
      */
     private void startDocker() throws DockerException {
-        runProcess("docker-compose", "--project-name", dockerId, "up", "--detach");
+        runProcess(null, "docker-compose", "--project-name", dockerId, "up", "--detach");
     }
     
     /**
@@ -215,17 +204,60 @@ public class StuMgmtDocker implements AutoCloseable {
      * @throws DockerException If stopping the containers fails.
      */
     private void stopDocker() throws DockerException {
-        runProcess("docker-compose", "--project-name", dockerId, "down");
+        runProcess(null, "docker-compose", "--project-name", dockerId, "down");
+    }
+    
+    /**
+     * Starts an SVN server for submissions for the given course.
+     * 
+     * @param courseId The ID of the course to set the submission SVN up for.
+     * @param user The user that the SVN rights-management uses to log into the management system. Should be a teacher
+     *      in the course.
+     * 
+     * @throws DockerException If creating the SVN server or registering it as a listener for the course fails.
+     * @throws IllegalStateException If SVN is already running.
+     */
+    public void startSvn(String courseId, String user) throws DockerException, IllegalStateException {
+        if (svnRunning) {
+            throw new IllegalStateException("SVN is already running");
+        }
+        svnRunning = true;
+        
+        Map<String, String> env = new HashMap<>();
+        env.put("SVN_COURSE", courseId);
+        env.put("SVN_MGMT_USER", user);
+        env.put("SVN_MGMT_PW", userPasswords.get(user));
+        
+        runProcess(env, "docker-compose", "--project-name", dockerId, "up", "svn", "--detach");
+        
+        
+        net.ssehub.studentmgmt.backend_api.ApiClient client = getAuthenticatedBackendClient("admin_user");
+        NotificationApi api = new NotificationApi(client);
+        
+        SubscriberDto subscriber = new SubscriberDto();
+        subscriber.setName("svn-rights-management");
+        subscriber.setUrl("http://svn:4000/rest/update");
+        subscriber.setEvents(Collections.singletonMap("ALL", true));
+        
+        try {
+            api.subscribe(subscriber, courseId, subscriber.getName());
+        } catch (net.ssehub.studentmgmt.backend_api.ApiException e) {
+            System.err.println(e.getResponseBody());
+            throw new DockerException(e);
+        }
+        
+        System.out.println("Sarted SVN submission server for course " + courseId);
     }
     
     /**
      * Runs a process in {@link #dockerDirectory} with the proper environment variables set.
      * 
+     * @param extraEnv Extra environment variables to set. <code>null</code> if not required.
      * @param command The command to run.
      * 
      * @throws DockerException If running the command fails.
      */
-    private void runProcess(String... command) throws DockerException {
+    private void runProcess(Map<String, String> extraEnv, String... command) throws DockerException {
         ProcessBuilder pb = new ProcessBuilder(command);
         pb.directory(dockerDirectory);
         pb.inheritIO();
@@ -248,8 +280,10 @@ public class StuMgmtDocker implements AutoCloseable {
         environment.put("FRONTEND_PORT", Integer.toString(webPort));
         environment.put("SVN_PORT", Integer.toString(svnPort));
         
-        if (withSvn) {
-            environment.put("COMPOSE_PROFILES", "svn");
+        if (extraEnv != null) {
+            for (Entry<String, String> entry : extraEnv.entrySet()) {
+                environment.put(entry.getKey(), entry.getValue());
+            }
         }
         
         Process p;
@@ -326,14 +360,14 @@ public class StuMgmtDocker implements AutoCloseable {
      * 
      * @return The URL of the SVN server.
      * 
-     * @throws IllegalStateException If there is no SVN server set up.
+     * @throws IllegalStateException If the SVN server was not started.
      * 
-     * @see #StuMgmtDocker(boolean)
-     * @see #isWithSvn()
+     * @see #startSvn(String, String)
+     * @see #isSvnRunning()
      */
     public String getSvnUrl() throws IllegalStateException {
-        if (!withSvn) {
-            throw new IllegalStateException("SVN server not enabled");
+        if (!svnRunning) {
+            throw new IllegalStateException("SVN server not started");
         }
         
         return "http://localhost:" + svnPort + "/svn/submission/";
@@ -344,9 +378,11 @@ public class StuMgmtDocker implements AutoCloseable {
      * Whether an SVN server is running.
      * 
      * @return If an SVN is running.
+     * 
+     * @see #startSvn(String, String)
      */
-    public boolean isWithSvn() {
-        return withSvn;
+    public boolean isSvnRunning() {
+        return svnRunning;
     }
     
     /**
@@ -727,15 +763,19 @@ public class StuMgmtDocker implements AutoCloseable {
      * @throws IOException If reading System.in fails.
      */
     public static void main(String[] args) throws IOException {
-        try (StuMgmtDocker docker = new StuMgmtDocker(true)) {
+        try (StuMgmtDocker docker = new StuMgmtDocker()) {
             
+            docker.createUser("svn", "abcdefgh");
             docker.createUser("adam", "123456");
             docker.createUser("student1", "123456");
             docker.createUser("student2", "123456");
             docker.createUser("student3", "123456");
             docker.createUser("student4", "123456");
             
-            String courseId = docker.createCourse("java", "wise2021", "Programmierpraktikum: Java", "adam");
+            String courseId = docker.createCourse("java", "wise2021", "Programmierpraktikum: Java", "adam", "svn");
+            
+            docker.startSvn(courseId, "svn");
+            
             docker.enrollStudentInCourse(courseId, "student1");
             docker.enrollStudentInCourse(courseId, "student2");
             docker.enrollStudentInCourse(courseId, "student3");
@@ -759,7 +799,7 @@ public class StuMgmtDocker implements AutoCloseable {
             System.out.println("Auth: " + docker.getAuthUrl());
             System.out.println("Mgmt: " + docker.getStuMgmtUrl());
             System.out.println("Web:  " + docker.getWebUrl());
-            if (docker.isWithSvn()) {
+            if (docker.isSvnRunning()) {
                 System.out.println("SVN:  " + docker.getSvnUrl());
             }
             
