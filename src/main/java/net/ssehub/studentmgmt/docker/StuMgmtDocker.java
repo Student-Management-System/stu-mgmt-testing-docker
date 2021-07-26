@@ -6,6 +6,8 @@ import java.io.File;
 import java.io.FileReader;
 import java.io.IOException;
 import java.io.InputStream;
+import java.io.InputStreamReader;
+import java.lang.ProcessBuilder.Redirect;
 import java.math.BigDecimal;
 import java.net.ServerSocket;
 import java.util.Arrays;
@@ -19,13 +21,14 @@ import net.ssehub.studentmgmt.backend_api.api.AssignmentApi;
 import net.ssehub.studentmgmt.backend_api.api.AuthenticationApi;
 import net.ssehub.studentmgmt.backend_api.api.CourseApi;
 import net.ssehub.studentmgmt.backend_api.api.CourseParticipantsApi;
+import net.ssehub.studentmgmt.backend_api.api.DefaultApi;
 import net.ssehub.studentmgmt.backend_api.api.GroupApi;
 import net.ssehub.studentmgmt.backend_api.api.NotificationApi;
 import net.ssehub.studentmgmt.backend_api.model.AssignmentDto;
-import net.ssehub.studentmgmt.backend_api.model.AssignmentUpdateDto;
 import net.ssehub.studentmgmt.backend_api.model.AssignmentDto.CollaborationEnum;
 import net.ssehub.studentmgmt.backend_api.model.AssignmentDto.StateEnum;
 import net.ssehub.studentmgmt.backend_api.model.AssignmentDto.TypeEnum;
+import net.ssehub.studentmgmt.backend_api.model.AssignmentUpdateDto;
 import net.ssehub.studentmgmt.backend_api.model.CourseConfigDto;
 import net.ssehub.studentmgmt.backend_api.model.CourseCreateDto;
 import net.ssehub.studentmgmt.backend_api.model.CourseDto;
@@ -73,6 +76,8 @@ public class StuMgmtDocker implements AutoCloseable {
     private static final String DOCKER_PROPERTY = "net.ssehub.studentmgmt.docker.rootPath";
     
     private static final String DOCKER_LOCATION_FILE = "stu-mgmt-docker-rootPath.txt";
+    
+    private static final int WAITING_TIMEOUT_MS = 60000;
     
     private File dockerDirectory;
     
@@ -130,6 +135,7 @@ public class StuMgmtDocker implements AutoCloseable {
         
         System.out.println("Waiting for services to be up...");
         waitUntilAuthReachable();
+        waitUntilMgmtBackendReachable();
     }
     
     /**
@@ -259,6 +265,8 @@ public class StuMgmtDocker implements AutoCloseable {
         }
         
         System.out.println("Sarted SVN submission server for course " + courseId);
+        System.out.println("Waiting for SVN rights-management to be up...");
+        waitUntilSvnRightsManagementReachable();
     }
     
     /**
@@ -337,7 +345,89 @@ public class StuMgmtDocker implements AutoCloseable {
                 } catch (InterruptedException e1) {
                 }
             }
-        } while (!success && System.currentTimeMillis() - tStart < 60000 /* 60 seconds */);
+        } while (!success && System.currentTimeMillis() - tStart < WAITING_TIMEOUT_MS);
+        
+        if (!success) {
+            System.out.println("sparky-service not reachable for " + WAITING_TIMEOUT_MS + " ms");
+        } else {
+            System.out.println("sparky-service reachable");
+        }
+    }
+    
+    /**
+     * Helper method that waits until the mgmt backend is alive (i.e. responds to uptime API).
+     */
+    private void waitUntilMgmtBackendReachable() {
+        net.ssehub.studentmgmt.backend_api.ApiClient client = new net.ssehub.studentmgmt.backend_api.ApiClient();
+        client.setBasePath(getStuMgmtUrl());
+        
+        DefaultApi api = new DefaultApi(client);
+        
+        
+        long tStart = System.currentTimeMillis();
+        boolean success;
+        do {
+            try {
+                api.appControllerGetUptime();
+                success = true;
+            } catch (net.ssehub.studentmgmt.backend_api.ApiException e) {
+                success = false;
+                try {
+                    Thread.sleep(10);
+                } catch (InterruptedException e1) {
+                }
+            }
+        } while (!success && System.currentTimeMillis() - tStart < WAITING_TIMEOUT_MS);
+        
+        if (!success) {
+            System.out.println("stu-mgmt-backend not reachable for " + WAITING_TIMEOUT_MS + " ms");
+        } else {
+            System.out.println("stu-mgmt-backend reachable");
+        }
+    }
+    
+    /**
+     * Helper method that waits until the rights-management in the SVN server is alive.
+     */
+    private void waitUntilSvnRightsManagementReachable() {
+        // we seem to have on way to contact the rights-management service inside the SVN server...
+        // thus we hackily just get the log output and grep for the status
+        
+        ProcessBuilder pb = new ProcessBuilder("docker-compose", "--project-name", dockerId, "logs", "svn");
+        pb.redirectOutput(Redirect.PIPE);
+        pb.redirectError(Redirect.INHERIT);
+        
+        long tStart = System.currentTimeMillis();
+        boolean success = false;
+        while (!success && System.currentTimeMillis() - tStart < WAITING_TIMEOUT_MS) {
+            try {
+                Process process = pb.start();
+                
+                BufferedReader in = new BufferedReader(new InputStreamReader(process.getInputStream()));
+                String line;
+                while ((line = in.readLine()) != null) {
+                    if (line.contains("net.ssehub.rightsmanagement.rest.RestServer - Starting server on port:")) {
+                        success = true;
+                    }
+                }
+                
+            } catch (IOException e) {
+                System.err.println("Failed to get docker logs: " + e.getMessage());
+            }
+            
+            if (!success) {
+                try {
+                    Thread.sleep(10);
+                } catch (InterruptedException e) {
+                }
+            }
+        }
+        
+        if (!success) {
+            System.out.println("SVN rights-management not reachable for " + WAITING_TIMEOUT_MS + " ms");
+        } else {
+            System.out.println("SVN rights-management reachable");
+        }
     }
     
     /**
