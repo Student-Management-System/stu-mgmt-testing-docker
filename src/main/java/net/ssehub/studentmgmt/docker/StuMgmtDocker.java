@@ -7,6 +7,7 @@ import java.io.FileReader;
 import java.io.IOException;
 import java.io.InputStream;
 import java.math.BigDecimal;
+import java.net.ServerSocket;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
@@ -183,10 +184,21 @@ public class StuMgmtDocker implements AutoCloseable {
     /**
      * Generates a random ephemeral port number.
      *  
-     * @return A number between 49152 and 65535.
+     * @return A random open port.
      */
     private int generateRandomPort() {
-        return  (int) (Math.random() * (65535 - 49152)) + 49152;
+        int port;
+        try (ServerSocket socket = new ServerSocket(0)) {
+            socket.setReuseAddress(true);
+            port = socket.getLocalPort();
+            
+        } catch (IOException e) {
+            System.err.println("Failed to get free port: " + e.getMessage());
+            System.err.println("Using random port number (might not be free)");
+            port = (int) (Math.random() * (65535 - 49152)) + 49152;
+        }
+        
+        return port;
     }
     
     /**
