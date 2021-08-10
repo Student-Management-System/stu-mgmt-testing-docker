@@ -429,6 +429,12 @@ public class StuMgmtDocker implements AutoCloseable {
         if (!success) {
             System.out.println("SVN rights-management not reachable for " + WAITING_TIMEOUT_MS + " ms");
         } else {
+            // wait a bit longer, this seems to be required
+            try {
+                Thread.sleep(500);
+            } catch (InterruptedException e) {
+            }
+            
             System.out.println("SVN rights-management reachable");
         }
     }
