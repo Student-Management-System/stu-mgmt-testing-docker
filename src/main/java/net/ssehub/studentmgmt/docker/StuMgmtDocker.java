@@ -758,7 +758,7 @@ public class StuMgmtDocker implements AutoCloseable {
                 net.ssehub.studentmgmt.backend_api.model.AssignmentUpdateDto.StateEnum.IN_PROGRESS),
         IN_REVIEW(StateEnum.IN_REVIEW,
                 net.ssehub.studentmgmt.backend_api.model.AssignmentUpdateDto.StateEnum.IN_REVIEW),
-        REVIEWD(StateEnum.EVALUATED,
+        REVIEWED(StateEnum.EVALUATED,
                 net.ssehub.studentmgmt.backend_api.model.AssignmentUpdateDto.StateEnum.EVALUATED);
         
         private StateEnum createValue;
