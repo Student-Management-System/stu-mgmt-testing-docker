@@ -395,6 +395,8 @@ public class StuMgmtDocker implements AutoCloseable {
     private void waitUntilSvnRightsManagementReachable() {
         // we seem to have no way to contact the rights-management service inside the svn container...
         // thus we hackily just get the log output and grep for the status
+        // the line "Rights-Management is up and reachable" is written by the startup script, once the rest server
+        //  responds to the heartbeat route
         
         ProcessBuilder pb = new ProcessBuilder("docker-compose", "--project-name", dockerId, "logs", "svn");
         pb.redirectOutput(Redirect.PIPE);
@@ -409,7 +411,7 @@ public class StuMgmtDocker implements AutoCloseable {
                 BufferedReader in = new BufferedReader(new InputStreamReader(process.getInputStream()));
                 String line;
                 while ((line = in.readLine()) != null) {
-                    if (line.contains("net.ssehub.rightsmanagement.rest.RestServer - Starting server on port:")) {
+                    if (line.endsWith("Rights-Management is up and reachable")) {
                         success = true;
                     }
                 }
