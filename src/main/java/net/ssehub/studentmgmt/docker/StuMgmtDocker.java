@@ -249,7 +249,7 @@ public class StuMgmtDocker implements AutoCloseable {
         env.put("SVN_MGMT_USER", user);
         env.put("SVN_MGMT_PW", userPasswords.get(user));
         
-        runProcess(env, "docker-compose", "--project-name", dockerId, "up", "svn", "--detach");
+        runProcess(env, "docker-compose", "--project-name", dockerId, "up", "--detach", "svn");
         
         
         net.ssehub.studentmgmt.backend_api.ApiClient client = getAuthenticatedBackendClient("admin_user");
@@ -399,6 +399,7 @@ public class StuMgmtDocker implements AutoCloseable {
         //  responds to the heartbeat route
         
         ProcessBuilder pb = new ProcessBuilder("docker-compose", "--project-name", dockerId, "logs", "svn");
+        pb.directory(dockerDirectory);
         pb.redirectOutput(Redirect.PIPE);
         pb.redirectError(Redirect.INHERIT);
         
