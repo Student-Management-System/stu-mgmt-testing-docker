@@ -9,8 +9,12 @@ import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.lang.ProcessBuilder.Redirect;
 import java.math.BigDecimal;
+import java.net.HttpURLConnection;
 import java.net.ServerSocket;
+import java.net.URL;
+import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
+import java.util.Base64;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.Map;
@@ -92,6 +96,8 @@ public class StuMgmtDocker implements AutoCloseable {
     private boolean svnRunning;
     
     private int svnPort;
+    
+    private String svnCourseId;
     
     private Map<String, String> userPasswords;
     
@@ -243,6 +249,7 @@ public class StuMgmtDocker implements AutoCloseable {
             throw new IllegalStateException("SVN is already running");
         }
         svnRunning = true;
+        svnCourseId = courseId;
         
         Map<String, String> env = new HashMap<>();
         env.put("SVN_COURSE", courseId);
@@ -353,7 +360,7 @@ public class StuMgmtDocker implements AutoCloseable {
         if (!success) {
             System.out.println("sparky-service not reachable for " + WAITING_TIMEOUT_MS + " ms");
         } else {
-            System.out.println("sparky-service reachable");
+            System.out.println("sparky-service reachable (" + (System.currentTimeMillis() - tStart) + " ms)");
         }
     }
     
@@ -365,7 +372,6 @@ public class StuMgmtDocker implements AutoCloseable {
         client.setBasePath(getStuMgmtUrl());
         
         DefaultApi api = new DefaultApi(client);
-        
         
         long tStart = System.currentTimeMillis();
         boolean success;
@@ -385,7 +391,7 @@ public class StuMgmtDocker implements AutoCloseable {
         if (!success) {
             System.out.println("stu-mgmt-backend not reachable for " + WAITING_TIMEOUT_MS + " ms");
         } else {
-            System.out.println("stu-mgmt-backend reachable");
+            System.out.println("stu-mgmt-backend reachable (" + (System.currentTimeMillis() - tStart) + " ms)");
         }
     }
     
@@ -438,7 +444,44 @@ public class StuMgmtDocker implements AutoCloseable {
             } catch (InterruptedException e) {
             }
             
-            System.out.println("SVN rights-management reachable");
+            System.out.println("SVN rights-management reachable (" + (System.currentTimeMillis() - tStart) + " ms)");
+        }
+    }
+    
+    /**
+     * Waits until the given assignment folder exists in the SVN repository.
+     * 
+     * @param assignmentFolder The name of the assignment folder that should exist in the SVN repository.
+     */
+    private void waitUntilSvnUpdated(String assignmentFolder) {
+        System.out.println("Waiting for " + assignmentFolder + " to exist in the SVN repository...");
+
+        String teacher = teachersOfCourse.get(svnCourseId);
+        String authString = teacher + ":" + userPasswords.get(teacher);
+        String authStringEncoded = Base64.getEncoder().encodeToString(authString.getBytes(StandardCharsets.UTF_8));
+        
+        long tStart = System.currentTimeMillis();
+        boolean success;
+        do {
+            
+            try {
+                HttpURLConnection connection =
+                        (HttpURLConnection) new URL(getSvnUrl() + assignmentFolder).openConnection();
+                connection.setRequestProperty("Authorization", "Basic " + authStringEncoded);
+                
+                success = connection.getResponseCode() == 200;
+                
+            } catch (IOException e) {
+                System.out.println("Failed to send HTTP request: " + e.getMessage());
+                success = false;
+            }
+            
+        } while (!success && System.currentTimeMillis() - tStart < WAITING_TIMEOUT_MS);
+        
+        if (!success) {
+            System.out.println(assignmentFolder + " not created for " + WAITING_TIMEOUT_MS + " ms");
+        } else {
+            System.out.println(assignmentFolder + " exists (" + (System.currentTimeMillis() - tStart) + " ms)");
         }
     }
     
@@ -806,7 +849,10 @@ public class StuMgmtDocker implements AutoCloseable {
      * <p>
      * Note that groups are only registered for an assignment in the {@link AssignmentState#SUBMISSION} state; if you
      * want to have groups registered in any other state, create it with state {@link AssignmentState#SUBMISSION} and
-     * change to the desired state afterwards (see {@link #changeAssignmentState(String, String, AssignmentState)}). 
+     * change to the desired state afterwards (see {@link #changeAssignmentState(String, String, AssignmentState)}).
+     * <p>
+     * If an SVN server is running for the given course, this method waits until the assignment is created in the SVN
+     * repository.
      * 
      * @param courseId The course to create the assignment in.
      * @param name The name of the assignment.
@@ -841,11 +887,18 @@ public class StuMgmtDocker implements AutoCloseable {
         
         System.out.println("Created " + collaboration.name() +  "-assignment " + name + " with status " + state.name());
         
+        if (svnRunning && courseId.equals(svnCourseId)) {
+            waitUntilSvnUpdated(assignment.getName());
+        }
+        
         return assignment.getId();
     }
     
     /**
      * Changes the state of an assignment.
+     * <p>
+     * If an SVN server is running for the given course, this method waits until the assignment is created in the SVN
+     * repository.
      * 
      * @param courseId The course where the assignment is in.
      * @param assignmentId The ID of the assignment, as returned by
@@ -874,6 +927,10 @@ public class StuMgmtDocker implements AutoCloseable {
         }
         
         System.out.println("Changed assignment " + assignment.getName() + " to status " + state.name());
+        
+        if (svnRunning && courseId.equals(svnCourseId)) {
+            waitUntilSvnUpdated(assignment.getName());
+        }
     }
     
     /**
@@ -895,8 +952,6 @@ public class StuMgmtDocker implements AutoCloseable {
             
             String courseId = docker.createCourse("java", "wise2021", "Programmierpraktikum: Java", "adam", "svn");
             
-            docker.startSvn(courseId, "svn");
-            
             docker.enrollStudent(courseId, "student1");
             docker.enrollStudent(courseId, "student2");
             docker.enrollStudent(courseId, "student3");
@@ -911,6 +966,9 @@ public class StuMgmtDocker implements AutoCloseable {
             
             docker.changeAssignmentState(courseId, a1, AssignmentState.SUBMISSION);
             docker.changeAssignmentState(courseId, a1, AssignmentState.IN_REVIEW);
+            
+            // start the SVN late, so that only one assignment change event triggers a full update
+            docker.startSvn(courseId, "svn");
             
             docker.changeAssignmentState(courseId, a2, AssignmentState.SUBMISSION);
             
