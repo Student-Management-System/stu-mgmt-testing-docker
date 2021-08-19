@@ -472,7 +472,6 @@ public class StuMgmtDocker implements AutoCloseable {
                 success = connection.getResponseCode() == 200;
                 
             } catch (IOException e) {
-                System.out.println("Failed to send HTTP request: " + e.getMessage());
                 success = false;
             }
             
