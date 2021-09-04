@@ -2,6 +2,7 @@ package net.ssehub.studentmgmt.docker;
 
 
 import java.io.BufferedReader;
+import java.io.ByteArrayInputStream;
 import java.io.File;
 import java.io.FileReader;
 import java.io.IOException;
@@ -13,15 +14,34 @@ import java.net.HttpURLConnection;
 import java.net.ServerSocket;
 import java.net.URL;
 import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Base64;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Map.Entry;
+
+import javax.xml.parsers.DocumentBuilder;
+import javax.xml.parsers.DocumentBuilderFactory;
+import javax.xml.parsers.ParserConfigurationException;
+
+import org.w3c.dom.Document;
+import org.w3c.dom.Element;
+import org.w3c.dom.Node;
+import org.w3c.dom.NodeList;
+import org.xml.sax.InputSource;
+import org.xml.sax.SAXException;
+
+import java.util.Optional;
+
+import com.google.gson.JsonParseException;
+
 import java.util.Properties;
 
 import net.ssehub.studentmgmt.backend_api.api.AssignmentApi;
+import net.ssehub.studentmgmt.backend_api.api.AssignmentRegistrationApi;
 import net.ssehub.studentmgmt.backend_api.api.AuthenticationApi;
 import net.ssehub.studentmgmt.backend_api.api.CourseApi;
 import net.ssehub.studentmgmt.backend_api.api.CourseParticipantsApi;
@@ -51,6 +71,7 @@ import net.ssehub.studentmgmt.sparkyservice_api.model.CredentialsDto;
 import net.ssehub.studentmgmt.sparkyservice_api.model.UserDto;
 import net.ssehub.studentmgmt.sparkyservice_api.model.UsernameDto;
 
+
 /**
  * A utility class for integration tests that runs a fresh instance of the Student Management System in a Docker
  * container. Multiple instances can safely be used in parallel.
@@ -74,6 +95,7 @@ import net.ssehub.studentmgmt.sparkyservice_api.model.UsernameDto;
  * </ul>
  * 
  * @author Adam
+ * @author Lukas
  */
 public class StuMgmtDocker implements AutoCloseable {
 
@@ -596,7 +618,137 @@ public class StuMgmtDocker implements AutoCloseable {
         
         System.out.println("Created user " + name + " with password: " + password);
     }
-    
+    /**
+     * This method handles the Html Response and gives all li Elements from the Html.
+     * @param data the Html string
+     * @return All li Elements as string
+     */
+    public List<String>handleHtmlResponseGetListElements(String data) {
+        List<String> response = new ArrayList<String>();
+        //fix parse problem 
+        data = data.replaceAll("<hr noshade>", "");
+        
+        try {
+            DocumentBuilder dBuilder = DocumentBuilderFactory.newInstance().newDocumentBuilder();
+            Document doc = dBuilder.parse(new InputSource(new ByteArrayInputStream(data.getBytes("utf-8"))));
+            
+            doc.getDocumentElement().normalize();
+            NodeList nList = doc.getElementsByTagName("li");
+            
+            for (int i = 0; i < nList.getLength(); i++) {
+                Node nNode = nList.item(i);
+                
+                Element eElement = (Element) nNode;
+              
+                response.add(eElement.getTextContent());
+                
+            }
+            
+        } catch (SAXException | IOException | ParserConfigurationException e) {
+            throw new DockerException(e);
+        }
+        return response;
+    }
+    /**
+     * Gets the content of the SvnFile if its defined otherwise lists all available files in Html.
+     * @param assignmentId
+     * @param filename Optional
+     * @param username
+     * @return the content as string
+     */
+    public String getHTTPResponseSvnFile(String assignmentId, Optional<String> filename, String username) {
+        net.ssehub.studentmgmt.backend_api.ApiClient mgmt = this.getAuthenticatedBackendClient(username);
+        AssignmentApi asApi = new AssignmentApi(mgmt);
+        String response = "";
+        AssignmentDto asDto = null;
+        try {
+            asDto = asApi.getAssignmentById(svnCourseId, assignmentId);
+        } catch (net.ssehub.studentmgmt.backend_api.ApiException e) {
+            throw new DockerException(e);
+        }
+        
+        String authString = username + ":" + userPasswords.get(username);
+        String authStringEncoded = Base64.getEncoder().encodeToString(authString.getBytes(StandardCharsets.UTF_8));
+        
+        String url = "";
+        
+        if (filename.isEmpty()) {
+            url = asDto.getCollaboration() == CollaborationEnum.SINGLE 
+                    ? getSvnUrl() + asDto.getName() + "/" + username + "/"
+                    : getSvnUrl() + asDto.getName() + "/" + getGroupName(assignmentId, username) + "/";
+        } else {
+            url = asDto.getCollaboration() == CollaborationEnum.SINGLE 
+                    ? getSvnUrl() + asDto.getName() + "/" + username + "/" + filename.get()
+                    : getSvnUrl() + asDto.getName() + "/" + getGroupName(assignmentId, username) + "/" + filename.get();
+        }
+      
+        response = getHttpResponse(url, authStringEncoded);    
+        
+        return response;
+       
+        
+    }
+    /**
+     * Makes a Http request to the specified Url with basic Auth.
+     * @param url
+     * @param authStringEncoded
+     * @return the response as String
+     */
+    private String getHttpResponse(String url, String authStringEncoded) {
+        
+        String response = "";
+        try {
+          
+            HttpURLConnection connection =
+                    (HttpURLConnection) new URL(url).openConnection();
+            connection.setRequestProperty("Authorization", "Basic " + authStringEncoded);
+            
+            InputStream input = connection.getInputStream();
+            BufferedReader reader = new BufferedReader(new InputStreamReader(input));
+            boolean ready = false;
+            while (!ready) {
+                String line = reader.readLine();
+                if (line != null) {
+                    response += line + "\n";     
+                } else {
+                    ready = true;
+                }
+            }
+            reader.close();
+            input.close();
+        } catch (IOException e) {
+            throw new DockerException(e);
+        }
+        
+        return response;
+       
+    }
+    /**
+     * Gets the groupname of an assignment for a user.
+     * @param assignmentid
+     * @param username
+     * @return name of the group as string
+     */
+    private String getGroupName(String assignmentid, String username) {
+        net.ssehub.studentmgmt.backend_api.ApiClient mgmt = this.getAuthenticatedBackendClient(username);
+        
+        AssignmentRegistrationApi assignmentRegistrations = new AssignmentRegistrationApi(mgmt);
+        
+        String groupName;
+        
+        try {
+            GroupDto group = assignmentRegistrations.getRegisteredGroupOfUser(svnCourseId,
+                    assignmentid, this.userMgmtIds.get(username));
+            
+            groupName = group.getName();
+            
+        } catch (net.ssehub.studentmgmt.backend_api.ApiException | JsonParseException e) {
+            throw new DockerException(e);
+            
+        } 
+        
+        return groupName;
+    }
     /**
      * Helper method to get a token for user. Uses the cached password.
      * 
