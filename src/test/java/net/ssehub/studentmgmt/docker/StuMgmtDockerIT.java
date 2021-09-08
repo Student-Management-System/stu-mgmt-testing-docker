@@ -67,7 +67,7 @@ public class StuMgmtDockerIT {
     @Test
     public void createCourseWithoutTeacherThrows() {
         try (StuMgmtDocker docker = new StuMgmtDocker()) {
-            IllegalArgumentException e = assertThrows(IllegalArgumentException.class, () -> docker.createCourse("test", "invalid", "Test"));
+            IllegalArgumentException e = assertThrows(IllegalArgumentException.class, () -> docker.createCourse("test", "wise2122", "Test"));
             assertEquals("Course must have at least one lecturer", e.getMessage());
         }
     }
