@@ -2,46 +2,34 @@ package net.ssehub.studentmgmt.docker;
 
 
 import java.io.BufferedReader;
-import java.io.ByteArrayInputStream;
 import java.io.File;
 import java.io.FileReader;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
+import java.io.StringReader;
 import java.lang.ProcessBuilder.Redirect;
 import java.math.BigDecimal;
-import java.net.HttpURLConnection;
 import java.net.ServerSocket;
-import java.net.URL;
-import java.nio.charset.StandardCharsets;
-import java.util.ArrayList;
 import java.util.Arrays;
-import java.util.Base64;
 import java.util.Collections;
 import java.util.HashMap;
-import java.util.List;
+import java.util.HashSet;
 import java.util.Map;
 import java.util.Map.Entry;
+import java.util.Properties;
+import java.util.Set;
 
 import javax.xml.parsers.DocumentBuilder;
 import javax.xml.parsers.DocumentBuilderFactory;
 import javax.xml.parsers.ParserConfigurationException;
 
 import org.w3c.dom.Document;
-import org.w3c.dom.Element;
-import org.w3c.dom.Node;
 import org.w3c.dom.NodeList;
 import org.xml.sax.InputSource;
 import org.xml.sax.SAXException;
 
-import java.util.Optional;
-
-import com.google.gson.JsonParseException;
-
-import java.util.Properties;
-
 import net.ssehub.studentmgmt.backend_api.api.AssignmentApi;
-import net.ssehub.studentmgmt.backend_api.api.AssignmentRegistrationApi;
 import net.ssehub.studentmgmt.backend_api.api.AuthenticationApi;
 import net.ssehub.studentmgmt.backend_api.api.CourseApi;
 import net.ssehub.studentmgmt.backend_api.api.CourseParticipantsApi;
@@ -60,6 +48,7 @@ import net.ssehub.studentmgmt.backend_api.model.GroupDto;
 import net.ssehub.studentmgmt.backend_api.model.GroupSettingsDto;
 import net.ssehub.studentmgmt.backend_api.model.PasswordDto;
 import net.ssehub.studentmgmt.backend_api.model.SubscriberDto;
+import net.ssehub.studentmgmt.docker.HttpUtils.HttpResponse;
 import net.ssehub.studentmgmt.sparkyservice_api.ApiClient;
 import net.ssehub.studentmgmt.sparkyservice_api.ApiException;
 import net.ssehub.studentmgmt.sparkyservice_api.api.AuthControllerApi;
@@ -479,19 +468,15 @@ public class StuMgmtDocker implements AutoCloseable {
         System.out.println("Waiting for " + assignmentFolder + " to exist in the SVN repository...");
 
         String teacher = teachersOfCourse.get(svnCourseId);
-        String authString = teacher + ":" + userPasswords.get(teacher);
-        String authStringEncoded = Base64.getEncoder().encodeToString(authString.getBytes(StandardCharsets.UTF_8));
+        String teacherPw = userPasswords.get(teacher);
         
         long tStart = System.currentTimeMillis();
         boolean success;
         do {
             
             try {
-                HttpURLConnection connection =
-                        (HttpURLConnection) new URL(getSvnUrl() + assignmentFolder).openConnection();
-                connection.setRequestProperty("Authorization", "Basic " + authStringEncoded);
-                
-                success = connection.getResponseCode() == 200;
+                HttpResponse response = HttpUtils.getAuthenticated(getSvnUrl() + assignmentFolder, teacher, teacherPw);
+                success = response.isSuccess();
                 
             } catch (IOException e) {
                 success = false;
@@ -618,137 +603,7 @@ public class StuMgmtDocker implements AutoCloseable {
         
         System.out.println("Created user " + name + " with password: " + password);
     }
-    /**
-     * This method handles the Html Response and gives all li Elements from the Html.
-     * @param data the Html string
-     * @return All li Elements as string
-     */
-    public List<String>handleHtmlResponseGetListElements(String data) {
-        List<String> response = new ArrayList<String>();
-        //fix parse problem 
-        data = data.replaceAll("<hr noshade>", "");
-        
-        try {
-            DocumentBuilder dBuilder = DocumentBuilderFactory.newInstance().newDocumentBuilder();
-            Document doc = dBuilder.parse(new InputSource(new ByteArrayInputStream(data.getBytes("utf-8"))));
-            
-            doc.getDocumentElement().normalize();
-            NodeList nList = doc.getElementsByTagName("li");
-            
-            for (int i = 0; i < nList.getLength(); i++) {
-                Node nNode = nList.item(i);
-                
-                Element eElement = (Element) nNode;
-              
-                response.add(eElement.getTextContent());
-                
-            }
-            
-        } catch (SAXException | IOException | ParserConfigurationException e) {
-            throw new DockerException(e);
-        }
-        return response;
-    }
-    /**
-     * Gets the content of the SvnFile if its defined otherwise lists all available files in Html.
-     * @param assignmentId
-     * @param filename Optional
-     * @param username
-     * @return the content as string
-     */
-    public String getHTTPResponseSvnFile(String assignmentId, Optional<String> filename, String username) {
-        net.ssehub.studentmgmt.backend_api.ApiClient mgmt = this.getAuthenticatedBackendClient(username);
-        AssignmentApi asApi = new AssignmentApi(mgmt);
-        String response = "";
-        AssignmentDto asDto = null;
-        try {
-            asDto = asApi.getAssignmentById(svnCourseId, assignmentId);
-        } catch (net.ssehub.studentmgmt.backend_api.ApiException e) {
-            throw new DockerException(e);
-        }
-        
-        String authString = username + ":" + userPasswords.get(username);
-        String authStringEncoded = Base64.getEncoder().encodeToString(authString.getBytes(StandardCharsets.UTF_8));
-        
-        String url = "";
-        
-        if (filename.isEmpty()) {
-            url = asDto.getCollaboration() == CollaborationEnum.SINGLE 
-                    ? getSvnUrl() + asDto.getName() + "/" + username + "/"
-                    : getSvnUrl() + asDto.getName() + "/" + getGroupName(assignmentId, username) + "/";
-        } else {
-            url = asDto.getCollaboration() == CollaborationEnum.SINGLE 
-                    ? getSvnUrl() + asDto.getName() + "/" + username + "/" + filename.get()
-                    : getSvnUrl() + asDto.getName() + "/" + getGroupName(assignmentId, username) + "/" + filename.get();
-        }
-      
-        response = getHttpResponse(url, authStringEncoded);    
-        
-        return response;
-       
-        
-    }
-    /**
-     * Makes a Http request to the specified Url with basic Auth.
-     * @param url
-     * @param authStringEncoded
-     * @return the response as String
-     */
-    private String getHttpResponse(String url, String authStringEncoded) {
-        
-        String response = "";
-        try {
-          
-            HttpURLConnection connection =
-                    (HttpURLConnection) new URL(url).openConnection();
-            connection.setRequestProperty("Authorization", "Basic " + authStringEncoded);
-            
-            InputStream input = connection.getInputStream();
-            BufferedReader reader = new BufferedReader(new InputStreamReader(input));
-            boolean ready = false;
-            while (!ready) {
-                String line = reader.readLine();
-                if (line != null) {
-                    response += line + "\n";     
-                } else {
-                    ready = true;
-                }
-            }
-            reader.close();
-            input.close();
-        } catch (IOException e) {
-            throw new DockerException(e);
-        }
-        
-        return response;
-       
-    }
-    /**
-     * Gets the groupname of an assignment for a user.
-     * @param assignmentid
-     * @param username
-     * @return name of the group as string
-     */
-    private String getGroupName(String assignmentid, String username) {
-        net.ssehub.studentmgmt.backend_api.ApiClient mgmt = this.getAuthenticatedBackendClient(username);
-        
-        AssignmentRegistrationApi assignmentRegistrations = new AssignmentRegistrationApi(mgmt);
-        
-        String groupName;
-        
-        try {
-            GroupDto group = assignmentRegistrations.getRegisteredGroupOfUser(svnCourseId,
-                    assignmentid, this.userMgmtIds.get(username));
-            
-            groupName = group.getName();
-            
-        } catch (net.ssehub.studentmgmt.backend_api.ApiException | JsonParseException e) {
-            throw new DockerException(e);
-            
-        } 
-        
-        return groupName;
-    }
+    
     /**
      * Helper method to get a token for user. Uses the cached password.
      * 
@@ -833,6 +688,14 @@ public class StuMgmtDocker implements AutoCloseable {
      */
     public String createCourse(String shortName, String semester, String title, String... lecturers)
             throws DockerException {
+        
+        if (!semester.matches("sose[0-9]{2}|wise[0-9]{4}")) {
+            throw new IllegalArgumentException("Semester must match be in the form of sose21 or wise2122");
+        }
+        
+        if (lecturers.length == 0) {
+            throw new IllegalArgumentException("Course must have at least one lecturer");
+        }
         
         net.ssehub.studentmgmt.backend_api.ApiClient client = getAuthenticatedBackendClient("admin_user");
         
@@ -1082,6 +945,76 @@ public class StuMgmtDocker implements AutoCloseable {
         if (svnRunning && courseId.equals(svnCourseId)) {
             waitUntilSvnUpdated(assignment.getName());
         }
+    }
+    
+    /**
+     * Gets the content of the given file on the SVN server over HTTP.
+     * 
+     * @param filepath The path of the file on the server without a leading slash.
+     *      Should include assignment and group name.
+     * 
+     * @return The content of the file as a string.
+     * 
+     * @throws DockerException If getting the file fails.
+     */
+    public String getSvnFileOverHttp(String filepath) throws DockerException {
+        String teacher = teachersOfCourse.get(svnCourseId);
+        String url = getSvnUrl() + filepath;
+        
+        HttpResponse response;
+        try {
+            response = HttpUtils.getAuthenticated(url, teacher, userPasswords.get(teacher));
+        } catch (IOException e) {
+            throw new DockerException(e);
+        }
+        
+        if (!response.isSuccess()) {
+            throw new DockerException("Response not successful: " + response);
+        }
+        
+        if (response.getBody().isEmpty()) {
+            throw new DockerException("Response has no body: " + response);
+        }
+        
+        return response.getBody().get();
+    }
+    
+    /**
+     * Gets the names of the files inside a given directory on the SVN server over HTTP.
+     * 
+     * @param directory The path of the directory on the server without a leading slash.
+     * 
+     * @return The filenames (including sub-directories) in the directory.
+     * 
+     * @throws DockerException If getting the directory content fails.
+     */
+    public Set<String> getSvnDirectoryContent(String directory) throws DockerException {
+        String content = getSvnFileOverHttp(directory);
+        // fix a parsing problem
+        content = content.replaceAll("<hr noshade>", "<hr />");
+        
+        Set<String> filenames;
+        
+        try  {
+            DocumentBuilder dBuilder = DocumentBuilderFactory.newInstance().newDocumentBuilder();
+            Document doc = dBuilder.parse(new InputSource(new StringReader(content)));
+            doc.getDocumentElement().normalize();
+            
+            NodeList contentList = doc.getElementsByTagName("li");
+            filenames = new HashSet<>(contentList.getLength());
+            
+            for (int i = 0; i < contentList.getLength(); i++) {
+                String filename = contentList.item(i).getTextContent();
+                if (!filename.equals("..")) {
+                    filenames.add(filename);
+                }
+            }
+            
+        } catch (SAXException | IOException | ParserConfigurationException e) {
+            throw new DockerException("Failed to parse HTML", e);
+        }
+        
+        return filenames;
     }
     
     /**
