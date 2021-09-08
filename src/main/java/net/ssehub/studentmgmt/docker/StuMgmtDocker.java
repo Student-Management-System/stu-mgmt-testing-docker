@@ -984,7 +984,8 @@ public class StuMgmtDocker implements AutoCloseable {
      * 
      * @param directory The path of the directory on the server without a leading slash.
      * 
-     * @return The filenames (including sub-directories) in the directory.
+     * @return The filenames (including sub-directories) in the directory. Sub-directory names will have a trailing
+     *      slash after their name.
      * 
      * @throws DockerException If getting the directory content fails.
      */

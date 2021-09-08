@@ -7,6 +7,10 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import java.util.Arrays;
+import java.util.Collections;
+import java.util.HashSet;
+
 import org.junit.jupiter.api.Test;
 
 import net.ssehub.studentmgmt.backend_api.api.DefaultApi;
@@ -94,6 +98,28 @@ public class StuMgmtDockerIT {
                 () -> assertTrue(docker.isSvnRunning()),
                 () -> assertHttpServerReachableWithAuth(docker.getSvnUrl(), "teacher", "123456"),
                 () -> assertThrows(IllegalStateException.class, () -> docker.startSvn(courseId, "teacher"))
+            );
+        }
+    }
+    
+    @Test
+    public void svnDirectoryContent() {
+        try (StuMgmtDocker docker = new StuMgmtDocker()) {
+            docker.createUser("teacher", "123456");
+            docker.createUser("student1", "123456");
+            docker.createUser("student2", "123456");
+            docker.createUser("otherstudent", "123456");
+            String courseId = docker.createCourse("test", "wise2021", "Test", "teacher");
+            docker.enrollStudent(courseId, "student1");
+            docker.enrollStudent(courseId, "student2");
+            docker.enrollStudent(courseId, "otherstudent");
+            docker.startSvn(courseId, "teacher");
+            docker.createAssignment(courseId, "Testassignment", AssignmentState.SUBMISSION, Collaboration.SINGLE);
+            
+            assertAll(
+                () -> assertEquals(new HashSet<>(Arrays.asList("Testassignment/")), docker.getSvnDirectoryContent("")),
+                () -> assertEquals(new HashSet<>(Arrays.asList("student1/", "student2/", "otherstudent/")), docker.getSvnDirectoryContent("Testassignment")),
+                () -> assertEquals(Collections.emptySet(), docker.getSvnDirectoryContent("Testassignment/student1"))
             );
         }
     }
