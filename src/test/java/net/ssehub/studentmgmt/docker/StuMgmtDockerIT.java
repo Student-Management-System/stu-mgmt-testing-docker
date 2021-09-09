@@ -14,6 +14,7 @@ import java.util.HashSet;
 import org.junit.jupiter.api.Test;
 
 import net.ssehub.studentmgmt.backend_api.api.DefaultApi;
+import net.ssehub.studentmgmt.docker.HttpUtils.HttpResponse;
 import net.ssehub.studentmgmt.docker.StuMgmtDocker.AssignmentState;
 import net.ssehub.studentmgmt.docker.StuMgmtDocker.Collaboration;
 import net.ssehub.studentmgmt.sparkyservice_api.api.RoutingControllerApi;
@@ -121,6 +122,26 @@ public class StuMgmtDockerIT {
                 () -> assertEquals(new HashSet<>(Arrays.asList("student1/", "student2/", "otherstudent/")), docker.getSvnDirectoryContent("Testassignment")),
                 () -> assertEquals(Collections.emptySet(), docker.getSvnDirectoryContent("Testassignment/student1"))
             );
+        }
+    }
+    
+    @Test
+    public void svnPermissionsUpdatedOnAssignmentStatusChange() {
+        try (StuMgmtDocker docker = new StuMgmtDocker()) {
+            docker.createUser("teacher", "123456");
+            docker.createUser("student1", "123456");
+            String courseId = docker.createCourse("test", "wise2021", "Test", "teacher");
+            docker.enrollStudent(courseId, "student1");
+            String assignment = docker.createAssignment(courseId, "Testassignment", AssignmentState.CLOSED, Collaboration.SINGLE);
+            docker.startSvn(courseId, "teacher");
+            
+            docker.changeAssignmentState(courseId, assignment, AssignmentState.INVISIBLE);
+            
+            HttpResponse response = assertDoesNotThrow(() -> HttpUtils.getAuthenticated(docker.getSvnUrl() + "Testassignment/student1", "student1", "123456"));
+            assertEquals(403, response.getCode());
+            
+            docker.changeAssignmentState(courseId, assignment, AssignmentState.SUBMISSION);
+            assertHttpServerReachableWithAuth(docker.getSvnUrl() + "Testassignment/student1", "student1", "123456");
         }
     }
     
