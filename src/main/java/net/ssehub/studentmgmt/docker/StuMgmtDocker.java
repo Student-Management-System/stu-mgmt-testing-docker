@@ -302,6 +302,7 @@ public class StuMgmtDocker implements AutoCloseable {
         ProcessBuilder pb = new ProcessBuilder(command);
         pb.directory(dockerDirectory);
         pb.inheritIO();
+        pb.redirectErrorStream(true);
         
         Properties envArgs = new Properties();
         try (InputStream in = getClass().getResourceAsStream("/net/ssehub/studentmgmt/docker/args.properties")) {
