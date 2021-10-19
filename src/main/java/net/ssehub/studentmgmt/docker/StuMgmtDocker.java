@@ -483,6 +483,13 @@ public class StuMgmtDocker implements AutoCloseable {
                 success = false;
             }
             
+            if (!success) {
+                try {
+                    Thread.sleep(10);
+                } catch (InterruptedException e) {
+                }
+            }
+            
         } while (!success && System.currentTimeMillis() - tStart < WAITING_TIMEOUT_MS);
         
         if (!success) {
