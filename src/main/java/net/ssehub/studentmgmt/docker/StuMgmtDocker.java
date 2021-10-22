@@ -621,7 +621,7 @@ public class StuMgmtDocker implements AutoCloseable {
      * 
      * @throws DockerException If getting the token fails.
      */
-    private String getToken(String user) throws DockerException {
+    public String getAuthToken(String user) throws DockerException {
         String token = userTokens.get(user);
         
         if (token == null) {
@@ -660,7 +660,7 @@ public class StuMgmtDocker implements AutoCloseable {
     private ApiClient getAuthenticatedAuthClient(String username) throws DockerException {
         ApiClient client = new ApiClient();
         client.setBasePath(getAuthUrl());
-        client.setAccessToken(getToken(username));
+        client.setAccessToken(getAuthToken(username));
         return client;
     }
     
@@ -678,7 +678,7 @@ public class StuMgmtDocker implements AutoCloseable {
         
         net.ssehub.studentmgmt.backend_api.ApiClient client = new net.ssehub.studentmgmt.backend_api.ApiClient();
         client.setBasePath(getStuMgmtUrl());
-        client.setAccessToken(getToken(username));
+        client.setAccessToken(getAuthToken(username));
         return client;
     }
     
