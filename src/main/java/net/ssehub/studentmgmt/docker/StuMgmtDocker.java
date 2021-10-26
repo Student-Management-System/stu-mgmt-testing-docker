@@ -6,28 +6,14 @@ import java.io.File;
 import java.io.FileReader;
 import java.io.IOException;
 import java.io.InputStream;
-import java.io.InputStreamReader;
-import java.io.StringReader;
-import java.lang.ProcessBuilder.Redirect;
 import java.math.BigDecimal;
 import java.net.ServerSocket;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
-import java.util.HashSet;
 import java.util.Map;
 import java.util.Map.Entry;
 import java.util.Properties;
-import java.util.Set;
-
-import javax.xml.parsers.DocumentBuilder;
-import javax.xml.parsers.DocumentBuilderFactory;
-import javax.xml.parsers.ParserConfigurationException;
-
-import org.w3c.dom.Document;
-import org.w3c.dom.NodeList;
-import org.xml.sax.InputSource;
-import org.xml.sax.SAXException;
 
 import net.ssehub.studentmgmt.backend_api.api.AssignmentApi;
 import net.ssehub.studentmgmt.backend_api.api.AuthenticationApi;
@@ -41,6 +27,8 @@ import net.ssehub.studentmgmt.backend_api.model.AssignmentDto.CollaborationEnum;
 import net.ssehub.studentmgmt.backend_api.model.AssignmentDto.StateEnum;
 import net.ssehub.studentmgmt.backend_api.model.AssignmentDto.TypeEnum;
 import net.ssehub.studentmgmt.backend_api.model.AssignmentUpdateDto;
+import net.ssehub.studentmgmt.backend_api.model.ChangeCourseRoleDto;
+import net.ssehub.studentmgmt.backend_api.model.ChangeCourseRoleDto.RoleEnum;
 import net.ssehub.studentmgmt.backend_api.model.CourseConfigDto;
 import net.ssehub.studentmgmt.backend_api.model.CourseCreateDto;
 import net.ssehub.studentmgmt.backend_api.model.CourseDto;
@@ -48,7 +36,6 @@ import net.ssehub.studentmgmt.backend_api.model.GroupDto;
 import net.ssehub.studentmgmt.backend_api.model.GroupSettingsDto;
 import net.ssehub.studentmgmt.backend_api.model.PasswordDto;
 import net.ssehub.studentmgmt.backend_api.model.SubscriberDto;
-import net.ssehub.studentmgmt.docker.HttpUtils.HttpResponse;
 import net.ssehub.studentmgmt.sparkyservice_api.ApiClient;
 import net.ssehub.studentmgmt.sparkyservice_api.ApiException;
 import net.ssehub.studentmgmt.sparkyservice_api.api.AuthControllerApi;
@@ -94,6 +81,10 @@ public class StuMgmtDocker implements AutoCloseable {
     
     private static final int WAITING_TIMEOUT_MS = 60000;
     
+    private static final String EXERCISE_SUBMITTER_SERVER_USER = "exercise-submitter-server";
+    
+    private static final String EXERCISE_SUBMITTER_SERVER_PW = "asdfghjkl";
+    
     private File dockerDirectory;
     
     private String dockerId;
@@ -104,11 +95,7 @@ public class StuMgmtDocker implements AutoCloseable {
     
     private int webPort;
     
-    private boolean svnRunning;
-    
-    private int svnPort;
-    
-    private String svnCourseId;
+    private int submissionServerPort;
     
     private Map<String, String> userPasswords;
     
@@ -142,7 +129,7 @@ public class StuMgmtDocker implements AutoCloseable {
         this.authPort = generateRandomPort();
         this.mgmtPort = generateRandomPort();
         this.webPort = generateRandomPort();
-        this.svnPort = generateRandomPort();
+        this.submissionServerPort = generateRandomPort();
 
         startDocker();
         
@@ -156,6 +143,9 @@ public class StuMgmtDocker implements AutoCloseable {
         System.out.println("Waiting for services to be up...");
         waitUntilAuthReachable();
         waitUntilMgmtBackendReachable();
+        
+        createUser(EXERCISE_SUBMITTER_SERVER_USER, EXERCISE_SUBMITTER_SERVER_PW);
+        waitUntilExerciseSubmitterServerReachable();
     }
     
     /**
@@ -233,7 +223,7 @@ public class StuMgmtDocker implements AutoCloseable {
      * @throws DockerException If starting the containers fails.
      */
     private void startDocker() throws DockerException {
-        runProcess(null, "docker-compose", "--project-name", dockerId, "up", "--detach");
+        runProcess("docker-compose", "--project-name", dockerId, "up", "--detach");
     }
     
     /**
@@ -242,63 +232,17 @@ public class StuMgmtDocker implements AutoCloseable {
      * @throws DockerException If stopping the containers fails.
      */
     private void stopDocker() throws DockerException {
-        runProcess(null, "docker-compose", "--project-name", dockerId, "down");
-    }
-    
-    /**
-     * Starts an SVN server for submissions for the given course.
-     * 
-     * @param courseId The ID of the course to set the submission SVN up for.
-     * @param user The user that the SVN rights-management uses to log into the management system. Should be a teacher
-     *      in the course.
-     * 
-     * @throws DockerException If creating the SVN server or registering it as a listener for the course fails.
-     * @throws IllegalStateException If SVN is already running.
-     */
-    public void startSvn(String courseId, String user) throws DockerException, IllegalStateException {
-        if (svnRunning) {
-            throw new IllegalStateException("SVN is already running");
-        }
-        svnRunning = true;
-        svnCourseId = courseId;
-        
-        Map<String, String> env = new HashMap<>();
-        env.put("SVN_COURSE", courseId);
-        env.put("SVN_MGMT_USER", user);
-        env.put("SVN_MGMT_PW", userPasswords.get(user));
-        
-        runProcess(env, "docker-compose", "--project-name", dockerId, "up", "--detach", "svn");
-        
-        
-        net.ssehub.studentmgmt.backend_api.ApiClient client = getAuthenticatedBackendClient("admin_user");
-        NotificationApi api = new NotificationApi(client);
-        
-        SubscriberDto subscriber = new SubscriberDto();
-        subscriber.setName("svn-rights-management");
-        subscriber.setUrl("http://svn:4000/rest/update");
-        subscriber.setEvents(Collections.singletonMap("ALL", true));
-        
-        try {
-            api.subscribe(subscriber, courseId, subscriber.getName());
-        } catch (net.ssehub.studentmgmt.backend_api.ApiException e) {
-            System.err.println(e.getResponseBody());
-            throw new DockerException(e);
-        }
-        
-        System.out.println("Sarted SVN submission server for course " + courseId);
-        System.out.println("Waiting for SVN rights-management to be up...");
-        waitUntilSvnRightsManagementReachable();
+        runProcess("docker-compose", "--project-name", dockerId, "down");
     }
     
     /**
      * Runs a process in {@link #dockerDirectory} with the proper environment variables set.
      * 
-     * @param extraEnv Extra environment variables to set. <code>null</code> if not required.
      * @param command The command to run.
      * 
      * @throws DockerException If running the command fails.
      */
-    private void runProcess(Map<String, String> extraEnv, String... command) throws DockerException {
+    private void runProcess(String... command) throws DockerException {
         ProcessBuilder pb = new ProcessBuilder(command);
         pb.directory(dockerDirectory);
         pb.inheritIO();
@@ -320,13 +264,9 @@ public class StuMgmtDocker implements AutoCloseable {
         environment.put("SPARKY_PORT", Integer.toString(authPort));
         environment.put("BACKEND_PORT", Integer.toString(mgmtPort));
         environment.put("FRONTEND_PORT", Integer.toString(webPort));
-        environment.put("SVN_PORT", Integer.toString(svnPort));
-        
-        if (extraEnv != null) {
-            for (Entry<String, String> entry : extraEnv.entrySet()) {
-                environment.put(entry.getKey(), entry.getValue());
-            }
-        }
+        environment.put("SUBMISSION_SERVER_PORT", Integer.toString(submissionServerPort));
+        environment.put("SUBMISSION_SERVER_MGMT_USER", EXERCISE_SUBMITTER_SERVER_USER);
+        environment.put("SUBMISSION_SERVER_MGMT_PW", EXERCISE_SUBMITTER_SERVER_PW);
         
         Process p;
         try {
@@ -408,94 +348,36 @@ public class StuMgmtDocker implements AutoCloseable {
     }
     
     /**
-     * Helper method that waits until the rights-management in the SVN server is alive.
+     * Helper method that waits until the exercise-submitter-server is alive (i.e. responds to heartbeat API).
      */
-    private void waitUntilSvnRightsManagementReachable() {
-        // we seem to have no way to contact the rights-management service inside the svn container...
-        // thus we hackily just get the log output and grep for the status
-        // the line "Rights-Management is up and reachable" is written by the startup script, once the rest server
-        //  responds to the heartbeat route
+    private void waitUntilExerciseSubmitterServerReachable() {
+        net.ssehub.teaching.exercise_submitter.server.api.ApiClient client
+                = new net.ssehub.teaching.exercise_submitter.server.api.ApiClient();
+        client.setBasePath(getExerciseSubmitterServerUrl());
         
-        ProcessBuilder pb = new ProcessBuilder("docker-compose", "--project-name", dockerId, "logs", "svn");
-        pb.directory(dockerDirectory);
-        pb.redirectOutput(Redirect.PIPE);
-        pb.redirectError(Redirect.INHERIT);
-        
-        long tStart = System.currentTimeMillis();
-        boolean success = false;
-        while (!success && System.currentTimeMillis() - tStart < WAITING_TIMEOUT_MS) {
-            try {
-                Process process = pb.start();
-                
-                BufferedReader in = new BufferedReader(new InputStreamReader(process.getInputStream()));
-                String line;
-                while ((line = in.readLine()) != null) {
-                    if (line.endsWith("Rights-Management is up and reachable")) {
-                        success = true;
-                    }
-                }
-                
-            } catch (IOException e) {
-                System.err.println("Failed to get docker logs: " + e.getMessage());
-            }
-            
-            if (!success) {
-                try {
-                    Thread.sleep(10);
-                } catch (InterruptedException e) {
-                }
-            }
-        }
-        
-        if (!success) {
-            System.out.println("SVN rights-management not reachable for " + WAITING_TIMEOUT_MS + " ms");
-        } else {
-            // wait a bit longer, this seems to be required
-            try {
-                Thread.sleep(500);
-            } catch (InterruptedException e) {
-            }
-            
-            System.out.println("SVN rights-management reachable (" + (System.currentTimeMillis() - tStart) + " ms)");
-        }
-    }
-    
-    /**
-     * Waits until the given assignment folder exists in the SVN repository.
-     * 
-     * @param assignmentFolder The name of the assignment folder that should exist in the SVN repository.
-     */
-    private void waitUntilSvnUpdated(String assignmentFolder) {
-        System.out.println("Waiting for " + assignmentFolder + " to exist in the SVN repository...");
-
-        String teacher = teachersOfCourse.get(svnCourseId);
-        String teacherPw = userPasswords.get(teacher);
+        net.ssehub.teaching.exercise_submitter.server.api.api.DefaultApi api
+                = new net.ssehub.teaching.exercise_submitter.server.api.api.DefaultApi(client);
         
         long tStart = System.currentTimeMillis();
         boolean success;
         do {
-            
             try {
-                HttpResponse response = HttpUtils.getAuthenticated(getSvnUrl() + assignmentFolder, teacher, teacherPw);
-                success = response.isSuccess();
-                
-            } catch (IOException e) {
+                api.heartbeat();
+                success = true;
+            } catch (net.ssehub.teaching.exercise_submitter.server.api.ApiException e) {
                 success = false;
-            }
-            
-            if (!success) {
                 try {
                     Thread.sleep(10);
-                } catch (InterruptedException e) {
+                } catch (InterruptedException e1) {
                 }
             }
-            
         } while (!success && System.currentTimeMillis() - tStart < WAITING_TIMEOUT_MS);
         
         if (!success) {
-            System.out.println(assignmentFolder + " not created for " + WAITING_TIMEOUT_MS + " ms");
+            System.out.println("exercise-submitter-server not reachable for " + WAITING_TIMEOUT_MS + " ms");
         } else {
-            System.out.println(assignmentFolder + " exists (" + (System.currentTimeMillis() - tStart) + " ms)");
+            System.out.println("exercise-submitter-server reachable ("
+                    + (System.currentTimeMillis() - tStart) + " ms)");
         }
     }
     
@@ -527,33 +409,12 @@ public class StuMgmtDocker implements AutoCloseable {
     }
     
     /**
-     * Returns the URL of the SVN server.
+     * Returns the URL to the exercise submission server.
      * 
-     * @return The URL of the SVN server.
-     * 
-     * @throws IllegalStateException If the SVN server was not started.
-     * 
-     * @see #startSvn(String, String)
-     * @see #isSvnRunning()
+     * @return The exercise submission server URL.
      */
-    public String getSvnUrl() throws IllegalStateException {
-        if (!svnRunning) {
-            throw new IllegalStateException("SVN server not started");
-        }
-        
-        return "http://localhost:" + svnPort + "/svn/submission/";
-    }
-    
-    
-    /**
-     * Whether an SVN server is running.
-     * 
-     * @return If an SVN is running.
-     * 
-     * @see #startSvn(String, String)
-     */
-    public boolean isSvnRunning() {
-        return svnRunning;
+    public String getExerciseSubmitterServerUrl() {
+        return "http://localhost:" + submissionServerPort + "";
     }
     
     /**
@@ -909,10 +770,6 @@ public class StuMgmtDocker implements AutoCloseable {
         
         System.out.println("Created " + collaboration.name() +  "-assignment " + name + " with status " + state.name());
         
-        if (svnRunning && courseId.equals(svnCourseId)) {
-            waitUntilSvnUpdated(assignment.getName());
-        }
-        
         return assignment.getId();
     }
     
@@ -949,81 +806,50 @@ public class StuMgmtDocker implements AutoCloseable {
         }
         
         System.out.println("Changed assignment " + assignment.getName() + " to status " + state.name());
-        
-        if (svnRunning && courseId.equals(svnCourseId)) {
-            waitUntilSvnUpdated(assignment.getName());
-        }
     }
-    
+
     /**
-     * Gets the content of the given file on the SVN server over HTTP.
+     * Sets up everything necessary that the exercise submission server can be used in the given course.
+     * This including enrolling the user {@value #EXERCISE_SUBMITTER_SERVER_USER} as a lecturer and adding the server
+     * as a subscriber to the notification API.
      * 
-     * @param filepath The path of the file on the server without a leading slash.
-     *      Should include assignment and group name.
+     * @param courseId The course to enable the exercise submitter server usage for.
      * 
-     * @return The content of the file as a string.
-     * 
-     * @throws DockerException If getting the file fails.
+     * @throws DockerException If enrolling the user as lecturer or adding the subscriber fails.
      */
-    public String getSvnFileOverHttp(String filepath) throws DockerException {
-        String teacher = teachersOfCourse.get(svnCourseId);
-        String url = getSvnUrl() + filepath;
+    public void enableExerciseSubmissionServer(String courseId) throws DockerException {
         
-        HttpResponse response;
+        enrollStudent(courseId, EXERCISE_SUBMITTER_SERVER_USER);
+        
+        net.ssehub.studentmgmt.backend_api.ApiClient client
+                = getAuthenticatedBackendClient(teachersOfCourse.get(courseId));
+        
+        CourseParticipantsApi participantsApi = new CourseParticipantsApi(client);
+        
         try {
-            response = HttpUtils.getAuthenticated(url, teacher, userPasswords.get(teacher));
-        } catch (IOException e) {
+            participantsApi.updateUserRole(new ChangeCourseRoleDto().role(RoleEnum.LECTURER),
+                    courseId, userMgmtIds.get("exercise-submitter-server"));
+        } catch (net.ssehub.studentmgmt.backend_api.ApiException e) {
+            System.err.println(e.getResponseBody());
             throw new DockerException(e);
         }
         
-        if (!response.isSuccess()) {
-            throw new DockerException("Response not successful: " + response);
+        NotificationApi api = new NotificationApi(client);
+        
+        SubscriberDto subscriber = new SubscriberDto();
+        subscriber.setName("exercise-submission-server");
+        subscriber.setUrl("http://exercise-submitter-server:8080/notify");
+        subscriber.setEvents(Collections.singletonMap("ALL", true));
+        
+        try {
+            api.subscribe(subscriber, courseId, subscriber.getName());
+        } catch (net.ssehub.studentmgmt.backend_api.ApiException e) {
+            System.err.println(e.getResponseBody());
+            throw new DockerException(e);
         }
         
-        if (response.getBody().isEmpty()) {
-            throw new DockerException("Response has no body: " + response);
-        }
-        
-        return response.getBody().get();
-    }
-    
-    /**
-     * Gets the names of the files inside a given directory on the SVN server over HTTP.
-     * 
-     * @param directory The path of the directory on the server without a leading slash.
-     * 
-     * @return The filenames (including sub-directories) in the directory. Sub-directory names will have a trailing
-     *      slash after their name.
-     * 
-     * @throws DockerException If getting the directory content fails.
-     */
-    public Set<String> getSvnDirectoryContent(String directory) throws DockerException {
-        String content = getSvnFileOverHttp(directory);
-        // fix a parsing problem
-        content = content.replaceAll("<hr noshade>", "<hr />");
-        
-        Set<String> filenames;
-        
-        try  {
-            DocumentBuilder dBuilder = DocumentBuilderFactory.newInstance().newDocumentBuilder();
-            Document doc = dBuilder.parse(new InputSource(new StringReader(content)));
-            doc.getDocumentElement().normalize();
-            
-            NodeList contentList = doc.getElementsByTagName("li");
-            filenames = new HashSet<>(contentList.getLength());
-            
-            for (int i = 0; i < contentList.getLength(); i++) {
-                String filename = contentList.item(i).getTextContent();
-                if (!filename.equals("..")) {
-                    filenames.add(filename);
-                }
-            }
-            
-        } catch (SAXException | IOException | ParserConfigurationException e) {
-            throw new DockerException("Failed to parse HTML", e);
-        }
-        
-        return filenames;
+        System.out.println("Enrolled " + EXERCISE_SUBMITTER_SERVER_USER
+                + " as teacher and enabled notifications for it in " + courseId);
     }
     
     /**
@@ -1036,14 +862,14 @@ public class StuMgmtDocker implements AutoCloseable {
     public static void main(String[] args) throws IOException {
         try (StuMgmtDocker docker = new StuMgmtDocker()) {
             
-            docker.createUser("svn", "abcdefgh");
             docker.createUser("adam", "123456");
             docker.createUser("student1", "123456");
             docker.createUser("student2", "123456");
             docker.createUser("student3", "123456");
             docker.createUser("student4", "123456");
             
-            String courseId = docker.createCourse("java", "wise2021", "Programmierpraktikum: Java", "adam", "svn");
+            String courseId = docker.createCourse("java", "wise2021", "Programmierpraktikum: Java", "adam");
+            docker.enableExerciseSubmissionServer(courseId);
             
             docker.enrollStudent(courseId, "student1");
             docker.enrollStudent(courseId, "student2");
@@ -1060,20 +886,15 @@ public class StuMgmtDocker implements AutoCloseable {
             docker.changeAssignmentState(courseId, a1, AssignmentState.SUBMISSION);
             docker.changeAssignmentState(courseId, a1, AssignmentState.IN_REVIEW);
             
-            // start the SVN late, so that only one assignment change event triggers a full update
-            docker.startSvn(courseId, "svn");
-            
             docker.changeAssignmentState(courseId, a2, AssignmentState.SUBMISSION);
             
             System.out.println();
             System.out.println();
             System.out.println("Docker running:");
-            System.out.println("Auth: " + docker.getAuthUrl());
-            System.out.println("Mgmt: " + docker.getStuMgmtUrl());
-            System.out.println("Web:  " + docker.getWebUrl());
-            if (docker.isSvnRunning()) {
-                System.out.println("SVN:  " + docker.getSvnUrl());
-            }
+            System.out.println("Auth:                " + docker.getAuthUrl());
+            System.out.println("Mgmt:                " + docker.getStuMgmtUrl());
+            System.out.println("Web:                 " + docker.getWebUrl());
+            System.out.println("Exercise Submission: " + docker.getExerciseSubmitterServerUrl());
             
             System.out.println();
             System.out.println("Press enter to stop");

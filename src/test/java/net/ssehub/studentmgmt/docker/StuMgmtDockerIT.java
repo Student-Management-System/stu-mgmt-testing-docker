@@ -3,18 +3,12 @@ package net.ssehub.studentmgmt.docker;
 import static org.junit.jupiter.api.Assertions.assertAll;
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
-
-import java.util.Arrays;
-import java.util.Collections;
-import java.util.HashSet;
 
 import org.junit.jupiter.api.Test;
 
 import net.ssehub.studentmgmt.backend_api.api.DefaultApi;
-import net.ssehub.studentmgmt.docker.HttpUtils.HttpResponse;
 import net.ssehub.studentmgmt.docker.StuMgmtDocker.AssignmentState;
 import net.ssehub.studentmgmt.docker.StuMgmtDocker.Collaboration;
 import net.ssehub.studentmgmt.sparkyservice_api.api.RoutingControllerApi;
@@ -27,7 +21,8 @@ public class StuMgmtDockerIT {
             assertAll(
                 () -> assertAuthSystemAlive(docker.getAuthUrl()),
                 () -> assertStuMgmtAlive(docker.getStuMgmtUrl()),
-                () -> assertHttpServerReachable(docker.getWebUrl())
+                () -> assertHttpServerReachable(docker.getWebUrl()),
+                () -> assertExerciseSubmittterServerAlive(docker.getExerciseSubmitterServerUrl())
             );
         }
     }
@@ -77,74 +72,6 @@ public class StuMgmtDockerIT {
         }
     }
     
-    @Test
-    public void getSvnUrlThrowsIfNotRunning() {
-        try (StuMgmtDocker docker = new StuMgmtDocker()) {
-            assertFalse(docker.isSvnRunning());
-            IllegalStateException e = assertThrows(IllegalStateException.class, () -> docker.getSvnUrl());
-            assertEquals("SVN server not started", e.getMessage());
-        }
-    }
-    
-    @Test
-    public void svnReachable() {
-        try (StuMgmtDocker docker = new StuMgmtDocker()) {
-            docker.createUser("teacher", "123456");
-            String courseId = docker.createCourse("test", "wise2021", "Test", "teacher");
-            docker.startSvn(courseId, "teacher");
-            // create an assignment so that the rights-management creates an initial access file
-            docker.createAssignment(courseId, "Testassignment", AssignmentState.SUBMISSION, Collaboration.SINGLE);
-            
-            assertAll(
-                () -> assertTrue(docker.isSvnRunning()),
-                () -> assertHttpServerReachableWithAuth(docker.getSvnUrl(), "teacher", "123456"),
-                () -> assertThrows(IllegalStateException.class, () -> docker.startSvn(courseId, "teacher"))
-            );
-        }
-    }
-    
-    @Test
-    public void svnDirectoryContent() {
-        try (StuMgmtDocker docker = new StuMgmtDocker()) {
-            docker.createUser("teacher", "123456");
-            docker.createUser("student1", "123456");
-            docker.createUser("student2", "123456");
-            docker.createUser("otherstudent", "123456");
-            String courseId = docker.createCourse("test", "wise2021", "Test", "teacher");
-            docker.enrollStudent(courseId, "student1");
-            docker.enrollStudent(courseId, "student2");
-            docker.enrollStudent(courseId, "otherstudent");
-            docker.startSvn(courseId, "teacher");
-            docker.createAssignment(courseId, "Testassignment", AssignmentState.SUBMISSION, Collaboration.SINGLE);
-            
-            assertAll(
-                () -> assertEquals(new HashSet<>(Arrays.asList("Testassignment/")), docker.getSvnDirectoryContent("")),
-                () -> assertEquals(new HashSet<>(Arrays.asList("student1/", "student2/", "otherstudent/")), docker.getSvnDirectoryContent("Testassignment")),
-                () -> assertEquals(Collections.emptySet(), docker.getSvnDirectoryContent("Testassignment/student1"))
-            );
-        }
-    }
-    
-    @Test
-    public void svnPermissionsUpdatedOnAssignmentStatusChange() {
-        try (StuMgmtDocker docker = new StuMgmtDocker()) {
-            docker.createUser("teacher", "123456");
-            docker.createUser("student1", "123456");
-            String courseId = docker.createCourse("test", "wise2021", "Test", "teacher");
-            docker.enrollStudent(courseId, "student1");
-            String assignment = docker.createAssignment(courseId, "Testassignment", AssignmentState.CLOSED, Collaboration.SINGLE);
-            docker.startSvn(courseId, "teacher");
-            
-            docker.changeAssignmentState(courseId, assignment, AssignmentState.INVISIBLE);
-            
-            HttpResponse response = assertDoesNotThrow(() -> HttpUtils.getAuthenticated(docker.getSvnUrl() + "Testassignment/student1", "student1", "123456"));
-            assertEquals(403, response.getCode());
-            
-            docker.changeAssignmentState(courseId, assignment, AssignmentState.SUBMISSION);
-            assertHttpServerReachableWithAuth(docker.getSvnUrl() + "Testassignment/student1", "student1", "123456");
-        }
-    }
-    
     private static void assertAuthSystemAlive(String url) {
         net.ssehub.studentmgmt.sparkyservice_api.ApiClient client = new net.ssehub.studentmgmt.sparkyservice_api.ApiClient();
         client.setBasePath(url);
@@ -161,12 +88,16 @@ public class StuMgmtDockerIT {
         assertDoesNotThrow(api::appControllerGetUptime);
     }
     
-    private static void assertHttpServerReachable(String url) {
-        assertTrue(assertDoesNotThrow(() -> HttpUtils.get(url)).isSuccess());
+    private static void assertExerciseSubmittterServerAlive(String url) {
+        net.ssehub.teaching.exercise_submitter.server.api.ApiClient client = new net.ssehub.teaching.exercise_submitter.server.api.ApiClient();
+        client.setBasePath(url);
+        
+        net.ssehub.teaching.exercise_submitter.server.api.api.DefaultApi api = new net.ssehub.teaching.exercise_submitter.server.api.api.DefaultApi(client);
+        assertDoesNotThrow(api::heartbeat);
     }
     
-    private static void assertHttpServerReachableWithAuth(String url, String username, String password) {
-        assertTrue(assertDoesNotThrow(() -> HttpUtils.getAuthenticated(url, username, password)).isSuccess());
+    private static void assertHttpServerReachable(String url) {
+        assertTrue(assertDoesNotThrow(() -> HttpUtils.get(url)).isSuccess());
     }
     
 }
