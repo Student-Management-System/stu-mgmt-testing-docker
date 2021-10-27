@@ -423,9 +423,11 @@ public class StuMgmtDocker implements AutoCloseable {
      * @param name The username of the new user.
      * @param password The password of the new user.
      * 
+     * @return The ID of the newly created user in the student management system (NOT in the auth system).
+     * 
      * @throws DockerException If creating the user fails.
      */
-    public void createUser(String name, String password) throws DockerException {
+    public String createUser(String name, String password) throws DockerException {
         if (password.length() < 6) {
             throw new IllegalArgumentException("Password must be at least 6 characters");
         }
@@ -461,8 +463,9 @@ public class StuMgmtDocker implements AutoCloseable {
         // make user "known" to stu-mgmt by calling its auth route
         net.ssehub.studentmgmt.backend_api.ApiClient backendClient = getAuthenticatedBackendClient(name);
         AuthenticationApi backendApi = new AuthenticationApi(backendClient);
+        net.ssehub.studentmgmt.backend_api.model.UserDto dto;
         try {
-            net.ssehub.studentmgmt.backend_api.model.UserDto dto = backendApi.whoAmI();
+            dto = backendApi.whoAmI();
             userMgmtIds.put(name, dto.getId());
             
         } catch (net.ssehub.studentmgmt.backend_api.ApiException e) {
@@ -471,6 +474,7 @@ public class StuMgmtDocker implements AutoCloseable {
         }
         
         System.out.println("Created user " + name + " with password: " + password);
+        return dto.getId();
     }
     
     /**
