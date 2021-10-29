@@ -46,6 +46,7 @@ import net.ssehub.studentmgmt.sparkyservice_api.model.ChangePasswordDto;
 import net.ssehub.studentmgmt.sparkyservice_api.model.CredentialsDto;
 import net.ssehub.studentmgmt.sparkyservice_api.model.UserDto;
 import net.ssehub.studentmgmt.sparkyservice_api.model.UsernameDto;
+import net.ssehub.teaching.exercise_submitter.server.api.api.StatusApi;
 
 
 /**
@@ -355,8 +356,7 @@ public class StuMgmtDocker implements AutoCloseable {
                 = new net.ssehub.teaching.exercise_submitter.server.api.ApiClient();
         client.setBasePath(getExerciseSubmitterServerUrl());
         
-        net.ssehub.teaching.exercise_submitter.server.api.api.DefaultApi api
-                = new net.ssehub.teaching.exercise_submitter.server.api.api.DefaultApi(client);
+        StatusApi api = new StatusApi(client);
         
         long tStart = System.currentTimeMillis();
         boolean success;

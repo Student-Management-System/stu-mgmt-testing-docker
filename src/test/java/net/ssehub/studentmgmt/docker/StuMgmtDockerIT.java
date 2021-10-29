@@ -12,6 +12,7 @@ import net.ssehub.studentmgmt.backend_api.api.DefaultApi;
 import net.ssehub.studentmgmt.docker.StuMgmtDocker.AssignmentState;
 import net.ssehub.studentmgmt.docker.StuMgmtDocker.Collaboration;
 import net.ssehub.studentmgmt.sparkyservice_api.api.RoutingControllerApi;
+import net.ssehub.teaching.exercise_submitter.server.api.api.StatusApi;
 
 public class StuMgmtDockerIT {
 
@@ -92,7 +93,7 @@ public class StuMgmtDockerIT {
         net.ssehub.teaching.exercise_submitter.server.api.ApiClient client = new net.ssehub.teaching.exercise_submitter.server.api.ApiClient();
         client.setBasePath(url);
         
-        net.ssehub.teaching.exercise_submitter.server.api.api.DefaultApi api = new net.ssehub.teaching.exercise_submitter.server.api.api.DefaultApi(client);
+        StatusApi api = new StatusApi(client);
         assertDoesNotThrow(api::heartbeat);
     }
     
