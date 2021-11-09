@@ -6,6 +6,8 @@ import java.io.File;
 import java.io.FileReader;
 import java.io.IOException;
 import java.io.InputStream;
+import java.io.InputStreamReader;
+import java.lang.ProcessBuilder.Redirect;
 import java.math.BigDecimal;
 import java.net.ServerSocket;
 import java.util.Arrays;
@@ -248,6 +250,7 @@ public class StuMgmtDocker implements AutoCloseable {
         pb.directory(dockerDirectory);
         pb.inheritIO();
         pb.redirectErrorStream(true);
+        pb.redirectOutput(Redirect.PIPE);
         
         Properties envArgs = new Properties();
         try (InputStream in = getClass().getResourceAsStream("/net/ssehub/studentmgmt/docker/args.properties")) {
@@ -275,6 +278,21 @@ public class StuMgmtDocker implements AutoCloseable {
         } catch (IOException e) {
             throw new DockerException("Failed to execute docker compose", e);
         }
+        
+        Thread outputReader = new Thread(() -> {
+            try (BufferedReader processOuptutStream = new BufferedReader(new InputStreamReader(p.getInputStream()))) {
+                
+                String line;
+                while ((line = processOuptutStream.readLine()) != null) {
+                    System.out.println(line);
+                }
+                
+            } catch (IOException e) {
+                e.printStackTrace();
+            }
+        });
+        outputReader.setDaemon(true);
+        outputReader.start();
         
         boolean interrupted;
         do {
