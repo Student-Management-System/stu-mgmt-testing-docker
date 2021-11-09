@@ -233,7 +233,7 @@ public class StuMgmtDocker implements AutoCloseable {
      * @throws DockerException If stopping the containers fails.
      */
     private void stopDocker() throws DockerException {
-        runProcess("docker-compose", "--project-name", dockerId, "down");
+        runProcess("docker-compose", "--project-name", dockerId, "down", "--volumes");
     }
     
     /**
