@@ -297,8 +297,12 @@ public class StuMgmtDocker implements AutoCloseable {
         boolean interrupted;
         do {
             try {
-                p.waitFor();
+                int exitCode = p.waitFor();
+                if (exitCode != 0) {
+                    System.out.println("Warning: exit code for " + Arrays.toString(command) + " is " + exitCode);
+                }
                 interrupted = false;
+                
             } catch (InterruptedException e) {
                 interrupted = true;
             }
