@@ -13,6 +13,8 @@ import java.net.ServerSocket;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.LinkedList;
+import java.util.List;
 import java.util.Map;
 import java.util.Map.Entry;
 import java.util.Properties;
@@ -37,6 +39,7 @@ import net.ssehub.studentmgmt.backend_api.model.CourseDto;
 import net.ssehub.studentmgmt.backend_api.model.GroupDto;
 import net.ssehub.studentmgmt.backend_api.model.GroupSettingsDto;
 import net.ssehub.studentmgmt.backend_api.model.PasswordDto;
+import net.ssehub.studentmgmt.backend_api.model.SubmissionConfigDto;
 import net.ssehub.studentmgmt.backend_api.model.SubscriberDto;
 import net.ssehub.studentmgmt.sparkyservice_api.ApiClient;
 import net.ssehub.studentmgmt.sparkyservice_api.ApiException;
@@ -832,6 +835,54 @@ public class StuMgmtDocker implements AutoCloseable {
         }
         
         System.out.println("Changed assignment " + assignment.getName() + " to status " + state.name());
+    }
+    
+    /**
+     * Sets the tool configuration string for the given assignment and tool.
+     * 
+     * @param courseId The ID of the course that the assignment is in.
+     * @param assignmentId The ID of the assignment to set the tool configuration string for.
+     * @param tool The name (key) of the tool to set the string for.
+     * @param configString The new configuration string to set.
+     * 
+     * @throws DockerException If getting the assignment or updating the configuration string fails.
+     */
+    public void setAssignmentToolConfigString(String courseId, String assignmentId, String tool, String configString)
+            throws DockerException {
+        
+        net.ssehub.studentmgmt.backend_api.ApiClient client
+                = getAuthenticatedBackendClient(teachersOfCourse.get(courseId));
+
+        AssignmentApi assignmentApi = new AssignmentApi(client);
+        
+        try {
+            AssignmentDto assignment = assignmentApi.getAssignmentById(courseId, assignmentId);
+            List<SubmissionConfigDto> configs = assignment.getConfigs();
+            if (configs == null) {
+                configs = new LinkedList<>();
+            }
+            
+            boolean found = false;
+            for (SubmissionConfigDto config : configs) {
+                if (config.getTool().equals(tool)) {
+                    config.setConfig(configString);
+                    found = true;
+                    break;
+                }
+            }
+            if (!found) {
+                configs.add(new SubmissionConfigDto().tool(tool).config(configString));
+            }
+            
+            AssignmentUpdateDto update = new AssignmentUpdateDto();
+            update.setConfigs(configs);
+            
+            assignmentApi.updateAssignment(update, courseId, assignmentId);
+            
+        } catch (net.ssehub.studentmgmt.backend_api.ApiException e) {
+            System.err.println(e.getResponseBody());
+            throw new DockerException(e);
+        }
     }
 
     /**
