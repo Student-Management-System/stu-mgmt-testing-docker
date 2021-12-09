@@ -958,7 +958,17 @@ public class StuMgmtDocker implements AutoCloseable {
             
             String a1 = docker.createAssignment(courseId, "Homework01", AssignmentState.INVISIBLE, Collaboration.GROUP);
             String a2 = docker.createAssignment(courseId, "Homework02", AssignmentState.INVISIBLE, Collaboration.GROUP);
-            docker.createAssignment(courseId, "Testat01", AssignmentState.INVISIBLE, Collaboration.SINGLE);
+            String t1 = docker.createAssignment(courseId, "Testat01", AssignmentState.INVISIBLE, Collaboration.SINGLE);
+            
+            docker.setAssignmentToolConfigString(courseId, a1, "exercise-submitter-checks",
+                    "[{\"check\":\"encoding\",\"rejecting\":true},{\"check\":\"javac\"},"
+                            + "{\"check\":\"checkstyle\",\"rules\":\"checkstyle.xml\"}]");
+            docker.setAssignmentToolConfigString(courseId, a2, "exercise-submitter-checks",
+                    "[{\"check\":\"encoding\",\"rejecting\":true},{\"check\":\"javac\"},"
+                            + "{\"check\":\"checkstyle\",\"rules\":\"checkstyle.xml\"}]");
+            docker.setAssignmentToolConfigString(courseId, t1, "exercise-submitter-checks",
+                    "[{\"check\":\"encoding\",\"rejecting\":true},{\"check\":\"javac\"},"
+                            + "{\"check\":\"checkstyle\",\"rules\":\"checkstyle.xml\"}]");
             
             docker.changeAssignmentState(courseId, a1, AssignmentState.SUBMISSION);
             docker.changeAssignmentState(courseId, a1, AssignmentState.IN_REVIEW);
