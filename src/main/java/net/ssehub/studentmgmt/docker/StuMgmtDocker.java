@@ -137,21 +137,31 @@ public class StuMgmtDocker implements AutoCloseable {
         this.webPort = generateRandomPort();
         this.submissionServerPort = generateRandomPort();
 
-        startDocker();
-        
-        this.userPasswords = new HashMap<>();
-        this.userPasswords.put("admin_user", "admin_pw");
-        this.userTokens = new HashMap<>();
-        
-        this.userMgmtIds = new HashMap<>();
-        this.teachersOfCourse = new HashMap<>();
-        
-        System.out.println("Waiting for services to be up...");
-        waitUntilAuthReachable();
-        waitUntilMgmtBackendReachable();
-        
-        createUser(EXERCISE_SUBMITTER_SERVER_USER, EXERCISE_SUBMITTER_SERVER_PW);
-        waitUntilExerciseSubmitterServerReachable();
+        try {
+            startDocker();
+            
+            this.userPasswords = new HashMap<>();
+            this.userPasswords.put("admin_user", "admin_pw");
+            this.userTokens = new HashMap<>();
+            
+            this.userMgmtIds = new HashMap<>();
+            this.teachersOfCourse = new HashMap<>();
+            
+            System.out.println("Waiting for services to be up...");
+            waitUntilAuthReachable();
+            waitUntilMgmtBackendReachable();
+            
+            createUser(EXERCISE_SUBMITTER_SERVER_USER, EXERCISE_SUBMITTER_SERVER_PW);
+            waitUntilExerciseSubmitterServerReachable();
+            
+        } catch (DockerException e) {
+            try {
+                close();
+            } catch (DockerException e1) {
+                // ignore
+            }
+            throw e;
+        }
     }
     
     /**
