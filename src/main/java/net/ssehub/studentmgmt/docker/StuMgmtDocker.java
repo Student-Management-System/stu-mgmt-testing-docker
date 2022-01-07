@@ -99,9 +99,17 @@ public class StuMgmtDocker implements AutoCloseable {
     
     private int mgmtPort;
     
+    private int submissionServerPort;
+
+    private boolean withFrontend;
+    
     private int webPort;
     
-    private int submissionServerPort;
+    private int pistonPort;
+    
+    private int webIdePort;
+    
+    private int showcasePort;
     
     private Map<String, String> userPasswords;
     
@@ -117,12 +125,13 @@ public class StuMgmtDocker implements AutoCloseable {
      * 
      * @param dockerDirectory The directory where the <code>docker-compose.yml</code> file for the student management
      *      system lies.
+     * @param withFrontend Whether to start the frontend (web) services, too.
      * 
      * @throws IllegalArgumentException If the given directory is not a directory or does not contain a
      *      docker-compose.yml file.
      * @throws DockerException If executing docker fails.
      */
-    public StuMgmtDocker(File dockerDirectory) throws DockerException {
+    public StuMgmtDocker(File dockerDirectory, boolean withFrontend) throws DockerException {
         if (!dockerDirectory.isDirectory()) {
             throw new IllegalArgumentException(dockerDirectory + " is not a directory");
         }
@@ -134,9 +143,16 @@ public class StuMgmtDocker implements AutoCloseable {
         this.dockerId = String.format("stu-mgmt-testing-%04d", (int) (Math.random() * 10000));
         this.authPort = generateRandomPort();
         this.mgmtPort = generateRandomPort();
-        this.webPort = generateRandomPort();
         this.submissionServerPort = generateRandomPort();
-
+        
+        this.withFrontend = withFrontend;
+        if (withFrontend) {
+            this.webPort = generateRandomPort();
+            this.pistonPort = generateRandomPort();
+            this.webIdePort = generateRandomPort();
+            this.showcasePort = generateRandomPort();
+        }
+        
         try {
             startDocker();
             
@@ -165,13 +181,25 @@ public class StuMgmtDocker implements AutoCloseable {
     }
     
     /**
-     * Starts a new instance of the Student Management System in docker containers. Waits until the services are fully
-     * started.
+     * Starts a new instance of the Student Management System in docker containers. Does not start the frontend
+     * services. Waits until the services are fully started.
      * 
      * @throws DockerException If executing docker fails.
      */
-    public StuMgmtDocker() {
-        this(getDockerRootPath());
+    public StuMgmtDocker() throws DockerException {
+        this(getDockerRootPath(), false);
+    }
+    
+    /**
+     * Starts a new instance of the Student Management System in docker containers. Waits until the services are fully
+     * started.
+     * 
+     * @param withFrontend Whether to start the frontend (web) services, too.
+     * 
+     * @throws DockerException If executing docker fails.
+     */
+    public StuMgmtDocker(boolean withFrontend) throws DockerException {
+        this(getDockerRootPath(), withFrontend);
     }
     
     /**
@@ -239,7 +267,11 @@ public class StuMgmtDocker implements AutoCloseable {
      * @throws DockerException If starting the containers fails.
      */
     private void startDocker() throws DockerException {
-        runProcess("docker-compose", "--project-name", dockerId, "up", "--detach");
+        if (withFrontend) {
+            runProcess("docker-compose", "--project-name", dockerId, "--profile", "frontend", "up", "--detach");
+        } else {
+            runProcess("docker-compose", "--project-name", dockerId, "up", "--detach");
+        }
     }
     
     /**
@@ -265,25 +297,8 @@ public class StuMgmtDocker implements AutoCloseable {
         pb.redirectErrorStream(true);
         pb.redirectOutput(Redirect.PIPE);
         
-        Properties envArgs = new Properties();
-        try (InputStream in = getClass().getResourceAsStream("/net/ssehub/studentmgmt/docker/args.properties")) {
-            envArgs.load(in);
-        } catch (IOException e) {
-            throw new DockerException("Can't load properties file with environment arguments", e);
-        }
-        
         Map<String, String> environment = pb.environment();
-        for (Entry<Object, Object> entry : envArgs.entrySet()) {
-            environment.put(entry.getKey().toString(), entry.getValue().toString());
-        }
-        
-        environment.put("FRONTEND_API_BASE_URL", getAuthUrl());
-        environment.put("SPARKY_PORT", Integer.toString(authPort));
-        environment.put("BACKEND_PORT", Integer.toString(mgmtPort));
-        environment.put("FRONTEND_PORT", Integer.toString(webPort));
-        environment.put("SUBMISSION_SERVER_PORT", Integer.toString(submissionServerPort));
-        environment.put("SUBMISSION_SERVER_MGMT_USER", EXERCISE_SUBMITTER_SERVER_USER);
-        environment.put("SUBMISSION_SERVER_MGMT_PW", EXERCISE_SUBMITTER_SERVER_PW);
+        setEnvironment(environment);
         
         Process p;
         try {
@@ -320,6 +335,47 @@ public class StuMgmtDocker implements AutoCloseable {
                 interrupted = true;
             }
         } while (interrupted);
+    }
+
+    /**
+     * Sets the required values in the environment.
+     * 
+     * @param environment The environment to set the variables in.
+     * 
+     * @throws DockerException If reading the args properties file fails.
+     */
+    private void setEnvironment(Map<String, String> environment) throws DockerException {
+        Properties envArgs = new Properties();
+        try (InputStream in = getClass().getResourceAsStream("/net/ssehub/studentmgmt/docker/args.properties")) {
+            envArgs.load(in);
+        } catch (IOException e) {
+            throw new DockerException("Can't load properties file with environment arguments", e);
+        }
+        
+        for (Entry<Object, Object> entry : envArgs.entrySet()) {
+            environment.put(entry.getKey().toString(), entry.getValue().toString());
+        }
+        
+        environment.put("FRONTEND_API_BASE_URL", getAuthUrl());
+        environment.put("SPARKY_PORT", Integer.toString(authPort));
+        environment.put("BACKEND_PORT", Integer.toString(mgmtPort));
+        environment.put("SUBMISSION_SERVER_PORT", Integer.toString(submissionServerPort));
+        environment.put("SUBMISSION_SERVER_MGMT_USER", EXERCISE_SUBMITTER_SERVER_USER);
+        environment.put("SUBMISSION_SERVER_MGMT_PW", EXERCISE_SUBMITTER_SERVER_PW);
+        if (withFrontend) {
+            environment.put("FRONTEND_PORT", Integer.toString(webPort));
+            environment.put("PISTON_PORT", Integer.toString(pistonPort));
+            environment.put("WEB_IDE_PORT", Integer.toString(webIdePort));
+            environment.put("SHOWCASE_PORT", Integer.toString(showcasePort));
+            
+            environment.put("SPARKY_SWAGGER_URL",
+                    getAuthUrl() + "/swagger-ui/index.html?configUrl=/v3/api-docs/swagger-config");
+            environment.put("BACKEND_SWAGGER_URL", getStuMgmtUrl() + "/api/");
+            environment.put("FRONTEND_URL", getWebUrl());
+            environment.put("SUBMISSION_SERVER_PATH", getExerciseSubmitterServerUrl());
+            environment.put("WEB_IDE_URL", getWebIdeUrl());
+            environment.put("WEB_IDE_CODE_EXECUTION_PATH", getPistonUrl());
+        }
     }
     
     /**
@@ -435,21 +491,68 @@ public class StuMgmtDocker implements AutoCloseable {
     }
     
     /**
-     * Returns the ULR of the web client.
-     * 
-     * @return The web client URL.
-     */
-    public String getWebUrl() {
-        return "http://localhost:" + webPort + "/";
-    }
-    
-    /**
      * Returns the URL to the exercise submission server.
      * 
      * @return The exercise submission server URL.
      */
     public String getExerciseSubmitterServerUrl() {
         return "http://localhost:" + submissionServerPort + "";
+    }
+    
+    /**
+     * Returns the ULR of the web client.
+     * 
+     * @return The web client URL.
+     * 
+     * @throws IllegalStateException If the frontend services were not started.
+     */
+    public String getWebUrl() throws IllegalStateException {
+        if (!withFrontend) {
+            throw new IllegalStateException();
+        }
+        return "http://localhost:" + webPort + "/";
+    }
+    
+    /**
+     * Returns the URL of the piston code execution service.
+     * 
+     * @return The URL to the piston service.
+     * 
+     * @throws IllegalStateException If the frontend services were not started.
+     */
+    public String getPistonUrl() throws IllegalStateException {
+        if (!withFrontend) {
+            throw new IllegalStateException();
+        }
+        return "http://localhost:" + pistonPort;
+    }
+    
+    /**
+     * Returns the URL of the web IDE client.
+     * 
+     * @return The URL to the web IDE client.
+     * 
+     * @throws IllegalStateException If the frontend services were not started.
+     */
+    public String getWebIdeUrl() throws IllegalStateException {
+        if (!withFrontend) {
+            throw new IllegalStateException();
+        }
+        return "http://localhost:" + webIdePort + "/";
+    }
+    
+    /**
+     * Returns the URL of the web showcase website.
+     * 
+     * @return The URL to the showcase.
+     * 
+     * @throws IllegalStateException If the frontend services were not started.
+     */
+    public String getShowcaseUrl() throws IllegalStateException {
+        if (!withFrontend) {
+            throw new IllegalStateException();
+        }
+        return "http://localhost:" + showcasePort + "/";
     }
     
     /**
@@ -947,7 +1050,9 @@ public class StuMgmtDocker implements AutoCloseable {
      * @throws IOException If reading System.in fails.
      */
     public static void main(String[] args) throws IOException {
-        try (StuMgmtDocker docker = new StuMgmtDocker()) {
+        final boolean withFrontend = true;
+        
+        try (StuMgmtDocker docker = new StuMgmtDocker(withFrontend)) {
             
             docker.createUser("adam", "123456");
             docker.createUser("student1", "123456");
@@ -990,8 +1095,14 @@ public class StuMgmtDocker implements AutoCloseable {
             System.out.println("Docker running:");
             System.out.println("Auth:                " + docker.getAuthUrl());
             System.out.println("Mgmt:                " + docker.getStuMgmtUrl());
-            System.out.println("Web:                 " + docker.getWebUrl());
             System.out.println("Exercise Submission: " + docker.getExerciseSubmitterServerUrl());
+            if (withFrontend) {
+                System.out.println();
+                System.out.println("Showcase:            " + docker.getShowcaseUrl());
+                System.out.println("Stu-Mgmt Web:        " + docker.getWebUrl());
+                System.out.println("Web-IDE:             " + docker.getWebIdeUrl());
+                System.out.println("Piston:              " + docker.getPistonUrl());
+            }
             
             System.out.println();
             System.out.println("Press enter to stop");

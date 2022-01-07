@@ -11,7 +11,7 @@ public class StuMgmtDockerTest {
 
     @Test
     public void constructorNotExistingDirectoryThrows() {
-        IllegalArgumentException e = assertThrows(IllegalArgumentException.class, () -> new StuMgmtDocker(new File("doesnt_exist")));
+        IllegalArgumentException e = assertThrows(IllegalArgumentException.class, () -> new StuMgmtDocker(new File("doesnt_exist"), false));
         assertEquals("doesnt_exist is not a directory", e.getMessage());
     }
     
@@ -21,7 +21,7 @@ public class StuMgmtDockerTest {
         emptyDir.mkdir();
         
         try {
-            IllegalArgumentException e = assertThrows(IllegalArgumentException.class, () -> new StuMgmtDocker(emptyDir));
+            IllegalArgumentException e = assertThrows(IllegalArgumentException.class, () -> new StuMgmtDocker(emptyDir, false));
             assertEquals("empty does not contain a docker-compose.yml file", e.getMessage());
         } finally {
             emptyDir.delete();

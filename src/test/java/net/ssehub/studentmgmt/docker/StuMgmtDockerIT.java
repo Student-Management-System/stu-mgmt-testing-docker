@@ -22,8 +22,18 @@ public class StuMgmtDockerIT {
             assertAll(
                 () -> assertAuthSystemAlive(docker.getAuthUrl()),
                 () -> assertStuMgmtAlive(docker.getStuMgmtUrl()),
-                () -> assertHttpServerReachable(docker.getWebUrl()),
                 () -> assertExerciseSubmittterServerAlive(docker.getExerciseSubmitterServerUrl())
+            );
+        }
+    }
+    
+    @Test
+    public void frontendServicesReachable() {
+        try (StuMgmtDocker docker = new StuMgmtDocker()) {
+            assertAll(
+                () -> assertHttpServerReachable(docker.getWebUrl()),
+                () -> assertHttpServerReachable(docker.getWebIdeUrl()),
+                () -> assertHttpServerReachable(docker.getShowcaseUrl())
             );
         }
     }
