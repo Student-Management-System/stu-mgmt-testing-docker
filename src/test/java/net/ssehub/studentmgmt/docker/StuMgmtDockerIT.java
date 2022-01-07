@@ -29,7 +29,7 @@ public class StuMgmtDockerIT {
     
     @Test
     public void frontendServicesReachable() {
-        try (StuMgmtDocker docker = new StuMgmtDocker()) {
+        try (StuMgmtDocker docker = new StuMgmtDocker(true)) {
             assertAll(
                 () -> assertHttpServerReachable(docker.getWebUrl()),
                 () -> assertHttpServerReachable(docker.getWebIdeUrl()),
