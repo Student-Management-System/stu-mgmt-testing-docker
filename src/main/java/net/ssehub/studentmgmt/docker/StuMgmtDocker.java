@@ -17,6 +17,7 @@ import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
 import java.util.Map.Entry;
+import java.util.stream.Collectors;
 import java.util.Properties;
 
 import net.ssehub.studentmgmt.backend_api.api.AssignmentApi;
@@ -727,7 +728,7 @@ public class StuMgmtDocker implements AutoCloseable {
         courseCreate.setShortname(shortName);
         courseCreate.setSemester(semester);
         courseCreate.setTitle(title);
-        courseCreate.setLecturers(Arrays.asList(lecturers));
+        courseCreate.setLecturers(Arrays.stream(lecturers).map(name -> name + "@LOCAL").collect(Collectors.toList()));
         courseCreate.setIsClosed(false);
         courseCreate.setConfig(courseConfig);
         
