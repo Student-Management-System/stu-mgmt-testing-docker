@@ -268,9 +268,9 @@ public class StuMgmtDocker implements AutoCloseable {
      */
     private void startDocker() throws DockerException {
         if (withFrontend) {
-            runProcess("docker-compose", "--project-name", dockerId, "--profile", "frontend", "up", "--detach");
+            runProcess("docker", "compose", "--project-name", dockerId, "--profile", "frontend", "up", "--detach");
         } else {
-            runProcess("docker-compose", "--project-name", dockerId, "up", "--detach");
+            runProcess("docker", "compose", "--project-name", dockerId, "up", "--detach");
         }
     }
     
@@ -280,7 +280,7 @@ public class StuMgmtDocker implements AutoCloseable {
      * @throws DockerException If stopping the containers fails.
      */
     private void stopDocker() throws DockerException {
-        runProcess("docker-compose", "--project-name", dockerId, "down", "--volumes");
+        runProcess("docker", "compose", "--project-name", dockerId, "down", "--volumes");
     }
     
     /**
