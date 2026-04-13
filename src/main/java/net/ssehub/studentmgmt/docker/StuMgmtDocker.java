@@ -278,7 +278,7 @@ public class StuMgmtDocker implements AutoCloseable {
             if (process.waitFor() == 0) {
                 return "docker compose";
             }
-        } catch (Exception e) {
+        } catch (IOException | InterruptedException e) {
             // Fallback to V1 "docker-compose"
         }
         return "docker-compose";
