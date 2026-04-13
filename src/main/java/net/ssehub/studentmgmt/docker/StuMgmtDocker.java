@@ -266,7 +266,7 @@ public class StuMgmtDocker implements AutoCloseable {
         return port;
     }
 
-    /*
+    /**
      * Helper method to get the docker compose base command.
      * Uses docker compose if plugin is installed on system.
      * Uses docker-compose if else.
