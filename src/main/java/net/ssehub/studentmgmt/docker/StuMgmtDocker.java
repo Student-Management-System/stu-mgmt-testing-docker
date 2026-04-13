@@ -270,6 +270,9 @@ public class StuMgmtDocker implements AutoCloseable {
      * Helper method to get the docker compose base command.
      * Uses docker compose if plugin is installed on system.
      * Uses docker-compose if else.
+     *
+     * @return String containing the compose base command to use.
+     * Either "docker compose" or "docker-compose"
      */
     private String getDockerComposeCmd() {
         try {
