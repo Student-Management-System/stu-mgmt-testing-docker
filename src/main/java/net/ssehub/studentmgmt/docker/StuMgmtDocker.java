@@ -10,6 +10,7 @@ import java.io.InputStreamReader;
 import java.lang.ProcessBuilder.Redirect;
 import java.math.BigDecimal;
 import java.net.ServerSocket;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
@@ -118,6 +119,8 @@ public class StuMgmtDocker implements AutoCloseable {
     private Map<String, String> userMgmtIds;
     
     private Map<String, String> teachersOfCourse;
+
+    private String dockerComposeBaseCmd;
     
     /**
      * Starts a new instance of the Student Management System in docker containers. Waits until the services are fully
@@ -152,6 +155,8 @@ public class StuMgmtDocker implements AutoCloseable {
             this.webIdePort = generateRandomPort();
             this.showcasePort = generateRandomPort();
         }
+
+        this.dockerComposeBaseCmd = this.getDockerComposeCmd();
         
         try {
             startDocker();
@@ -260,18 +265,46 @@ public class StuMgmtDocker implements AutoCloseable {
         
         return port;
     }
-    
+
+    /*
+     * Helper method to get the docker compose base command.
+     * Uses docker compose if plugin is installed on system.
+     * Uses docker-compose if else.
+     */
+    private String getDockerComposeCmd() {
+        try {
+            // Try "docker compose" to see if V2 plugin is installed
+            Process process = new ProcessBuilder("docker", "compose", "version").start();
+            if (process.waitFor() == 0) {
+                return "docker compose";
+            }
+        } catch (Exception e) {
+            // Fallback to V1 "docker-compose"
+        }
+        return "docker-compose";
+    }
+
     /**
      * Helper method to start the docker containers.
      * 
      * @throws DockerException If starting the containers fails.
      */
     private void startDocker() throws DockerException {
-        if (withFrontend) {
-            runProcess("docker", "compose", "--project-name", dockerId, "--profile", "frontend", "up", "--detach");
+        List<String> command = new ArrayList<>();
+        if (this.dockerComposeBaseCmd.equals("docker compose")) {
+            command.addAll(Arrays.asList("docker", "compose"));
         } else {
-            runProcess("docker", "compose", "--project-name", dockerId, "up", "--detach");
+            command.add("docker-compose");
         }
+
+        command.addAll(Arrays.asList("--project-name", dockerId));
+
+        if (withFrontend) {
+            command.addAll(Arrays.asList("--profile", "frontend"));
+        }
+
+        command.addAll(Arrays.asList("up", "--detach"));
+        runProcess(command.toArray(new String[0]));
     }
     
     /**
@@ -280,7 +313,14 @@ public class StuMgmtDocker implements AutoCloseable {
      * @throws DockerException If stopping the containers fails.
      */
     private void stopDocker() throws DockerException {
-        runProcess("docker", "compose", "--project-name", dockerId, "down", "--volumes");
+        List<String> command = new ArrayList<>();
+        if (this.dockerComposeBaseCmd.equals("docker compose")) {
+            command.addAll(Arrays.asList("docker", "compose"));
+        } else {
+            command.add("docker-compose");
+        }
+        command.addAll(Arrays.asList("--project-name", dockerId, "down", "--volumes"));
+        runProcess(command.toArray(new String[0]));
     }
     
     /**
